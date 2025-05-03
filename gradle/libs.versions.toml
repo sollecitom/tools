@@ -1,0 +1,126 @@
+[versions]
+# buildSrc libraries
+semver4j = "3.1.0"
+# libraries
+kotlin = "2.1.10"
+kotlinx-coroutines = "1.10.2"
+slf4j = "2.0.17"
+http4k = "6.6.0.1"
+junit-jupiter = "5.12.2"
+junit-platform = "1.12.2"
+assertk = "0.28.1"
+kotlinx-datetime = "0.6.2"
+ulid-creator = "5.2.3"
+ksuid-creator = "4.1.1"
+org-json = "20250107"
+erosb-json-schema = "0.21.0"
+guava = "33.4.8-jre"
+bouncy-castle = "1.80"
+keycloak = "26.0.5"
+test-containers = "1.20.6"
+test-containers-keycloak = "3.7.0"
+swagger-parser = "2.1.26"
+atlassian-swagger-request-validator = "2.44.1"
+pulsar = "4.0.4"
+avro = "1.12.0"
+yauaa = "7.30.0"
+log4j = "2.24.3"
+zero-allocation-hashing = "0.27ea0"
+jnats = "2.21.1"
+jose4j = "0.9.6"
+jackson-datatype = "2.18.3"
+micrometer = "1.14.6"
+postgres = "42.7.5"
+r2dbc-spi = "1.0.0.RELEASE"
+r2dbc-pool = "1.0.2.RELEASE"
+r2dbc-postgres = "1.0.7.RELEASE"
+spring-data-r2dbc = "3.4.4"
+liquibase = "4.31.1"
+snakeyaml = "2.4"
+liquibase-slf4j = "5.1.0"
+classgraph = "4.8.179"
+opentelemetry = "1.49.0"
+grafana-otel-lgtm = "1.20.6"
+# plugins
+palantir-git-plugin = "3.2.0"
+version-catalog-report-plugin = "0.51.0"
+version-catalog-update-plugin = "0.8.4"
+jib-plugin = "3.4.4"
+
+[libraries]
+# for buildSrc
+semver4j = { module = "com.vdurmont:semver4j", version.ref = "semver4j" }
+# for the build itself
+kotlinx-coroutines-bom = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-bom", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
+kotlinx-coroutines-jdk8 = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-jdk8" }
+kotlinx-coroutines-reactive = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactive" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
+kotlinx-coroutines-debug = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-debug" }
+kotlinx-coroutines-slf4j = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-slf4j" }
+kotlinx-coroutines-reactor = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactor" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
+http4k-bom = { module = "org.http4k:http4k-bom", version.ref = "http4k" }
+http4k-core = { module = "org.http4k:http4k-core" }
+http4k-ops-micrometer = { module = "org.http4k:http4k-ops-micrometer" }
+http4k-platform-k8s = { module = "org.http4k:http4k-platform-k8s" }
+http4k-format-core = { module = "org.http4k:http4k-format-core" }
+http4k-format-jackson = { module = "org.http4k:http4k-format-jackson" }
+http4k-format-jackson-yaml = { module = "org.http4k:http4k-format-jackson-yaml" }
+jackson-datatype = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson-datatype" }
+http4k-server-jetty = { module = "org.http4k:http4k-server-jetty" }
+http4k-client-apache = { module = "org.http4k:http4k-client-apache" }
+http4k-client-apache-async = { module = "org.http4k:http4k-client-apache-async" }
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
+ulid-creator = { module = "com.github.f4b6a3:ulid-creator", version.ref = "ulid-creator" }
+ksuid-creator = { module = "com.github.f4b6a3:ksuid-creator", version.ref = "ksuid-creator" }
+org-json = { module = "org.json:json", version.ref = "org-json" }
+json-schema-parser = { module = "com.github.erosb:json-sKema", version.ref = "erosb-json-schema" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncy-castle" }
+bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncy-castle" }
+bcutil = { module = "org.bouncycastle:bcutil-jdk18on", version.ref = "bouncy-castle" }
+junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit-jupiter" }
+junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-jupiter" }
+junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
+assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
+test-containers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", version.ref = "test-containers" }
+test-containers-pulsar = { module = "org.testcontainers:pulsar", version.ref = "test-containers" }
+test-containers-postgres = { module = "org.testcontainers:postgresql", version.ref = "test-containers" }
+keycloak-authz-client = { module = "org.keycloak:keycloak-authz-client", version.ref = "keycloak" }
+test-containers-kycloak = { module = "com.github.dasniko:testcontainers-keycloak", version.ref = "test-containers-keycloak" }
+swagger-parser = { module = "io.swagger.parser.v3:swagger-parser-v3", version.ref = "swagger-parser" }
+swagger-request-validator = { module = "com.atlassian.oai:swagger-request-validator-core", version.ref = "atlassian-swagger-request-validator" }
+pulsar-client-admin = { module = "org.apache.pulsar:pulsar-client-admin", version.ref = "pulsar" }
+apache-avro-core = { module = "org.apache.avro:avro", version.ref = "avro" }
+yet-another-user-agent-analyzer = { module = "nl.basjes.parse.useragent:yauaa", version.ref = "yauaa" }
+log4j-to-slf4j = { module = "org.apache.logging.log4j:log4j-to-slf4j", version.ref = "log4j" }
+com-github-ben-manes-versions = { module = "com.github.ben-manes.versions:com.github.ben-manes.versions.gradle.plugin", version.ref = "version-catalog-report-plugin" }
+nl-littlerobots-version-catalog-update = { module = "nl.littlerobots.version-catalog-update:nl.littlerobots.version-catalog-update.gradle.plugin", version.ref = "version-catalog-update-plugin" }
+zero-allocation-hashing = { module = "net.openhft:zero-allocation-hashing", version.ref = "zero-allocation-hashing" }
+postgres = { module = "org.postgresql:postgresql", version.ref = "postgres" }
+r2dbc-pool = { module = "io.r2dbc:r2dbc-pool", version.ref = "r2dbc-pool" }
+r2dbc-spi = { module = "io.r2dbc:r2dbc-spi", version.ref = "r2dbc-spi" }
+r2dbc-postgres = { module = "org.postgresql:r2dbc-postgresql", version.ref = "r2dbc-postgres" }
+spring-data-r2dbc = { module = "org.springframework.data:spring-data-r2dbc", version.ref = "spring-data-r2dbc" }
+liquibase = { module = "org.liquibase:liquibase-core", version.ref = "liquibase" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+opentelemetry-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "opentelemetry" }
+opentelemetry-sdk-core = { module = "io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetry" }
+opentelemetry-sdk-logs = { module = "io.opentelemetry:opentelemetry-sdk-logs", version.ref = "opentelemetry" }
+opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
+testcontainers-grafana-otel-lgtm = { module = "org.testcontainers:grafana", version.ref = "grafana-otel-lgtm" }
+jnats = { module = "io.nats:jnats", version.ref = "jnats" }
+jose4j = { module = "org.bitbucket.b_c:jose4j", version.ref = "jose4j" }
+classgraph = { module = "io.github.classgraph:classgraph", version.ref = "classgraph" }
+liquibase-slf4j = { module = "com.mattbertolini:liquibase-slf4j", version.ref = "liquibase-slf4j" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+jib-gradle-plugin = { module = "com.google.cloud.tools:jib-gradle-plugin", version.ref = "jib-plugin" }
+
+[plugins]
+com-github-ben-manes-versions = { id = "com.github.ben-manes.versions", version.ref = "version-catalog-report-plugin" }
+com-palantir-git-version = { id = "com.palantir.git-version", version.ref = "palantir-git-plugin" }
+nl-littlerobots-version-catalog-update = { id = "nl.littlerobots.version-catalog-update", version.ref = "version-catalog-update-plugin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

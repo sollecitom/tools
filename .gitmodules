@@ -1,0 +1,15 @@
+[submodule "gradle-plugins"]
+	path = gradle-plugins
+	url = https://github.com/sollecitom/gradle-plugins
+[submodule "swissknife"]
+	path = swissknife
+	url = https://github.com/sollecitom/swissknife
+[submodule "acme-schema-catalogue"]
+	path = acme-schema-catalogue
+	url = https://github.com/sollecitom/acme-schema-catalogue
+[submodule "pillar"]
+	path = pillar
+	url = https://github.com/sollecitom/pillar
+[submodule "examples"]
+	path = examples
+	url = https://github.com/sollecitom/examples
