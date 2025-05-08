@@ -1,6 +1,6 @@
 #!/usr/bin/env just --justfile
 
-addSubmodule submodule:
+initSubmodule submodule:
     git submodule update --init --recursive {{submodule}}
 
 resetAll:
