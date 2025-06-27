@@ -1,9 +1,5 @@
 @file:Suppress("UnstableApiUsage")
 
-includeBuild(".")
-includeBuild("gradle-plugins")
-includeProject("swissknife")
-
 rootProject.name = "tools"
 
 fun module(vararg pathSegments: String) = subProject(rootFolder = "modules", pathSegments = pathSegments)

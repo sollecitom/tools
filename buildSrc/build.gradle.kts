@@ -1,8 +1,12 @@
 import sollecitom.plugins.RepositoryConfiguration
 
 buildscript {
+    repositories {
+        mavenLocal()
+    }
+
     dependencies {
-        classpath("sollecitom.gradle-plugins", "gradle-plugins")
+        classpath(libs.sollecitom.gradle.plugins)
     }
 }
 
@@ -15,6 +19,7 @@ plugins {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     gradlePluginPortal()
     RepositoryConfiguration.BuildScript.apply(this)

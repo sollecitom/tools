@@ -1,6 +1,6 @@
 dependencies {
     implementation(projects.toolsPackageMigratorDomain)
-    implementation(projects.swissknifeKotlinExtensions)
+    implementation(libs.swissknife.kotlin.extensions)
 
-    runtimeOnly(projects.swissknifeLoggerSlf4jAdapter)
+    runtimeOnly(libs.swissknife.logger.slf4j.adapter)
 }

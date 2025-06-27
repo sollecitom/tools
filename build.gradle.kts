@@ -15,12 +15,17 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 buildscript {
+    repositories {
+        mavenLocal()
+    }
+
     dependencies {
-        classpath("sollecitom.gradle-plugins", "gradle-plugins")
+        classpath(libs.sollecitom.gradle.plugins)
     }
 }
 
 repositories {
+    mavenLocal()
     RepositoryConfiguration.BuildScript.apply(this)
 }
 
@@ -38,12 +43,9 @@ val parentProject = this
 val currentVersion: String by project
 val versionDetails: Closure<VersionDetails> by extra
 val gitVersion = versionDetails()
-val libsFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }.resolve("libs")
-val servicesFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }.resolve("services")
-val toolsFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }.resolve("tools")
-val resourceFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }.resolve("resources")
+val publicationsFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }.resolve("libs")
 
-fun Project.isLibrary() = projectDir.path.let { Paths.get(it) }.startsWith(libsFolder)
+fun Project.shouldBePublished() = projectDir.path.let { Paths.get(it) }.startsWith(publicationsFolder)
 
 apply<AggregateTestMetricsConventions>()
 
@@ -67,7 +69,7 @@ allprojects {
         isReproducibleFileOrder = true
     }
 
-    if (isLibrary()) {
+    if (shouldBePublished()) {
         apply<MavenPublishConvention>()
     }
 

@@ -1,5 +1,5 @@
 dependencies {
-    api(projects.swissknifeLoggerCore)
+    api(libs.swissknife.logger.core)
 
-    implementation(projects.swissknifeKotlinExtensions)
+    implementation(libs.swissknife.kotlin.extensions)
 }
