@@ -1,16 +1,15 @@
+import com.palantir.gradle.gitversion.GitVersionPlugin
+import com.palantir.gradle.gitversion.VersionDetails
+import groovy.lang.Closure
+import sollecitom.plugins.Plugins
+import sollecitom.plugins.RepositoryConfiguration
+import sollecitom.plugins.conventions.task.dependency.update.DependencyUpdateConvention
 import sollecitom.plugins.conventions.task.dependency.version.MinimumDependencyVersion
 import sollecitom.plugins.conventions.task.dependency.version.MinimumDependencyVersionConventions
 import sollecitom.plugins.conventions.task.kotlin.KotlinTaskConventions
 import sollecitom.plugins.conventions.task.maven.publish.MavenPublishConvention
 import sollecitom.plugins.conventions.task.test.AggregateTestMetricsConventions
 import sollecitom.plugins.conventions.task.test.TestTaskConventions
-import sollecitom.plugins.RepositoryConfiguration
-import sollecitom.plugins.conventions.task.dependency.update.DependencyUpdateConvention
-import com.palantir.gradle.gitversion.GitVersionPlugin
-import com.palantir.gradle.gitversion.VersionDetails
-import groovy.lang.Closure
-import sollecitom.plugins.Plugins
-import sollecitom.plugins.ProjectSettings
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -25,7 +24,6 @@ buildscript {
 }
 
 repositories {
-    mavenLocal()
     RepositoryConfiguration.BuildScript.apply(this)
 }
 
@@ -40,7 +38,8 @@ apply<GitVersionPlugin>()
 apply<DependencyUpdateConvention>()
 
 val parentProject = this
-val currentVersion: String by project
+val projectGroup: String by properties
+val currentVersion: String by properties
 val versionDetails: Closure<VersionDetails> by extra
 val gitVersion = versionDetails()
 val publicationsFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }.resolve("libs")
@@ -53,7 +52,7 @@ allprojects {
 
     project.extra["gitVersion"] = gitVersion
 
-    group = ProjectSettings.groupId
+    group = projectGroup
     version = currentVersion
 
     repositories { RepositoryConfiguration.Modules.apply(this, project) }
