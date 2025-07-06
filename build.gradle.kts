@@ -27,7 +27,6 @@ repositories {
     RepositoryConfiguration.BuildScript.apply(this)
 }
 
-@Suppress("DSL_SCOPE_VIOLATION")
 plugins {
     `java-library`
     idea
