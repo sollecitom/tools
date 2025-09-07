@@ -6,7 +6,8 @@ buildscript {
     }
 
     dependencies {
-        classpath(libs.sollecitom.gradle.plugins)
+        classpath(libs.sollecitom.gradle.plugins.base)
+        classpath(libs.sollecitom.gradle.plugins.kotlin.jvm)
     }
 }
 
