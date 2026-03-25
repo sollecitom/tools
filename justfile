@@ -4,7 +4,7 @@ resetAll:
     git fetch origin && git reset --hard origin/main && git clean -f -d
 
 push:
-    git diff --quiet HEAD || git commit -am "WIP" && git push origin main
+    git add -A && (git diff --quiet HEAD || git commit -am "WIP" && git push origin main)
 
 pull:
     git pull
