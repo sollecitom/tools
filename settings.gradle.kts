@@ -1,5 +1,9 @@
 @file:Suppress("UnstableApiUsage")
 
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
+}
+
 rootProject.name = "tools"
 
 fun module(vararg pathSegments: String) = subProject(rootFolder = "modules", pathSegments = pathSegments)
