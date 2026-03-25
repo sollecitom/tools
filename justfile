@@ -1,10 +1,10 @@
 #!/usr/bin/env just --justfile
 
-resetAll:
+reset-all:
     git fetch origin && git reset --hard origin/main && git clean -f -d
 
 push:
-    git add -A && (git diff --quiet HEAD || git commit -am "WIP" && git push origin main)
+    git add -A && (git diff --quiet HEAD || git commit -am "WIP") && git push origin main
 
 pull:
     git pull
@@ -15,14 +15,14 @@ build:
 rebuild:
     ./gradlew --refresh-dependencies --rerun-tasks clean build
 
-updateDependencies:
+update-dependencies:
     ./gradlew versionCatalogUpdate
 
-updateGradle:
+update-gradle:
     ./gradlew wrapper --gradle-version latest --distribution-type all
 
-updateAll:
-    just updateDependencies && just updateGradle
+update-all:
+    just update-dependencies && just update-gradle
 
-publishLibraries:
+publish-libraries:
     ./gradlew build publishToMavenLocal
