@@ -3,13 +3,8 @@ import com.palantir.gradle.gitversion.VersionDetails
 import groovy.lang.Closure
 import sollecitom.plugins.Plugins
 import sollecitom.plugins.RepositoryConfiguration
-import sollecitom.plugins.conventions.task.dependency.update.DependencyUpdateConvention
 import sollecitom.plugins.conventions.task.dependency.version.MinimumDependencyVersion
 import sollecitom.plugins.conventions.task.dependency.version.MinimumDependencyVersionConventions
-import sollecitom.plugins.conventions.task.kotlin.KotlinTaskConventions
-import sollecitom.plugins.conventions.task.maven.publish.MavenPublishConvention
-import sollecitom.plugins.conventions.task.test.AggregateTestMetricsConventions
-import sollecitom.plugins.conventions.task.test.TestTaskConventions
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -35,7 +30,7 @@ plugins {
 }
 
 apply<GitVersionPlugin>()
-apply<DependencyUpdateConvention>()
+apply(plugin = "sollecitom.dependency-update-conventions")
 
 val parentProject = this
 val projectGroup: String by properties
@@ -46,7 +41,7 @@ val publicationsFolder: Path = rootProject.projectDir.path.let { Paths.get(it) }
 
 fun Project.shouldBePublished() = projectDir.path.let { Paths.get(it) }.startsWith(publicationsFolder)
 
-apply<AggregateTestMetricsConventions>()
+apply(plugin = "sollecitom.aggregate-test-metrics-conventions")
 
 allprojects {
 
@@ -60,8 +55,8 @@ allprojects {
     apply<IdeaPlugin>()
     idea { module { inheritOutputDirs = true } }
 
-    apply<KotlinTaskConventions>()
-    apply<TestTaskConventions>()
+    apply(plugin = "sollecitom.kotlin-conventions")
+    apply(plugin = "sollecitom.test-conventions")
 
     tasks.withType<AbstractArchiveTask>().configureEach {
         isPreserveFileTimestamps = false
@@ -69,12 +64,12 @@ allprojects {
     }
 
     if (shouldBePublished()) {
-        apply<MavenPublishConvention>()
+        apply(plugin = "sollecitom.maven-publish-conventions")
     }
 
     java(Plugins.JavaPlugin::configure)
 
-    apply<MinimumDependencyVersionConventions>()
+    apply(plugin = "sollecitom.minimum-dependency-version-conventions")
     configure<MinimumDependencyVersionConventions.Extension> {
         val apacheCommonsCompress = MinimumDependencyVersion(group = "org.apache.commons", name = "commons-compress", minimumVersion = "1.26.0")
         knownVulnerableDependencies.set(
