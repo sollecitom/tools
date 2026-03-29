@@ -7,6 +7,7 @@ plugins {
 rootProject.name = "tools"
 
 includeBuild("../gradle-plugins")
+includeBuild("../swissknife")
 
 fun module(vararg pathSegments: String) = subProject(rootFolder = "modules", pathSegments = pathSegments)
 
