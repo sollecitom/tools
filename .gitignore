@@ -37,4 +37,4 @@ workspace.xml
 
 *.tgz
 Chart.lock
-*.pid
+*.pidjava_pid*.hprof
