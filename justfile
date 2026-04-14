@@ -1,5 +1,7 @@
 #!/usr/bin/env just --justfile
 
+set quiet
+
 reset-all:
     git fetch origin && git reset --hard origin/main && git clean -f -d
 
