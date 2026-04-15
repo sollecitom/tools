@@ -12,7 +12,10 @@ pull:
     git pull
 
 build:
-    ./gradlew build
+    ./gradlew updateInternalCatalogVersions && ./gradlew build
+
+update-internal-dependencies:
+    ./gradlew updateInternalCatalogVersions
 
 rebuild:
     ./gradlew --refresh-dependencies --rerun-tasks clean build
@@ -24,7 +27,7 @@ update-dependencies:
     ./scripts/update-gradle.sh
 
 update-all:
-    just update-dependencies && just update-gradle
+    just update-internal-dependencies && just update-dependencies && just update-gradle
 
 publish-libraries:
     ./gradlew build publishToMavenLocal
