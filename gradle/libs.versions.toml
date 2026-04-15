@@ -3,7 +3,7 @@
 kotlin = "2.3.20"
 sollecitom-swissknife = "1.0.0-SNAPSHOT"
 # plugins
-sollecitom-gradle-plugins = "1.0.0-SNAPSHOT"
+sollecitom-gradle-plugins = "1.0.2"
 palantir-git-plugin = "5.0.0"
 
 [libraries]
@@ -16,3 +16,6 @@ swissknife-kotlin-extensions = { module = "sollecitom.swissknife:kotlin-extensio
 [plugins]
 com-palantir-git-version = { id = "com.palantir.git-version", version.ref = "palantir-git-plugin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+sollecitom-aggregate-test-metrics-conventions = { id = "sollecitom.aggregate-test-metrics-conventions", version.ref = "sollecitom-gradle-plugins" }
+sollecitom-dependency-update-conventions = { id = "sollecitom.dependency-update-conventions", version.ref = "sollecitom-gradle-plugins" }
+sollecitom-kotlin-library-conventions = { id = "sollecitom.kotlin-library-conventions", version.ref = "sollecitom-gradle-plugins" }
