@@ -14,6 +14,15 @@ pull:
 build:
     ./gradlew updateInternalCatalogVersions && ./gradlew build
 
+license-audit-workspace +repos:
+    bash ../scripts/run-license-audit.sh {{repos}}
+
+license-audit:
+    bash ../scripts/run-license-audit.sh tools
+
+generate-sbom:
+    bash ../scripts/run-generate-sbom.sh tools
+
 cleanup:
     bash ../scripts/cleanup-maven-local.sh --repo-root . --keep 2 --max-age-days 14
 

@@ -2,6 +2,8 @@
 # libraries
 kotlin = "2.3.21"
 sollecitom-swissknife = "1.0.1"
+org-json = "20251224"
+snakeyaml = "2.6"
 # plugins
 sollecitom-gradle-plugins = "1.0.7"
 palantir-git-plugin = "5.0.0"
@@ -12,6 +14,8 @@ sollecitom-gradle-plugins-kotlin-jvm = { module = "sollecitom.gradle-plugins:kot
 swissknife-logger-core = { module = "sollecitom.swissknife:logger-core", version.ref = "sollecitom-swissknife" }
 swissknife-logger-slf4j-adapter = { module = "sollecitom.swissknife:logger-slf4j-adapter", version.ref = "sollecitom-swissknife" }
 swissknife-kotlin-extensions = { module = "sollecitom.swissknife:kotlin-extensions", version.ref = "sollecitom-swissknife" }
+org-json = { module = "org.json:json", version.ref = "org-json" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
 
 [plugins]
 com-palantir-git-version = { id = "com.palantir.git-version", version.ref = "palantir-git-plugin" }

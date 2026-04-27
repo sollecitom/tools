@@ -45,3 +45,4 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 module("package-migrator", "domain")
 module("package-migrator", "app")
+module("license-audit", "app")
