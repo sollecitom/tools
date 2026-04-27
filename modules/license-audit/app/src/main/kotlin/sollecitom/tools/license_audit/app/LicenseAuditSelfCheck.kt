@@ -6,7 +6,8 @@ fun main() {
         review = setOf("MPL-2.0", "LicenseRef-Internal-Review"),
         denied = setOf("GPL-3.0-only"),
         aliases = mapOf("Apache 2.0" to "Apache-2.0", "MIT License" to "MIT"),
-        packageOverrides = emptyMap(),
+        licenseNotes = emptyMap(),
+        packageOverrides = emptyList(),
         internalGroups = listOf("sollecitom"),
         repoPolicyFile = "license-waivers.yml",
         allowRepoOverrideOfDenied = false,
@@ -32,6 +33,17 @@ fun main() {
 
     check(classifier.classify(listOf(LicenseStatement.fromExpression("(Apache-2.0 OR MIT) AND GPL-3.0-only"))).status == Status.REVIEW) {
         "Expected mixed AND/OR expressions to stay review-required."
+    }
+
+    check(
+        classifier.classify(
+            listOf(
+                LicenseStatement.single("LGPL-2.1-or-later"),
+                LicenseStatement.single("Apache-2.0"),
+            )
+        ).status == Status.ALLOW
+    ) {
+        "Expected multiple license entries to pass when at least one branch is allowed."
     }
 
     println("License audit self-checks passed.")

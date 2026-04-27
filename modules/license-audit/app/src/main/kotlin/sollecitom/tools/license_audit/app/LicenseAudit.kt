@@ -23,7 +23,8 @@ import kotlin.io.path.relativeTo
 import kotlin.io.path.walk
 import kotlin.system.exitProcess
 
-private const val CACHE_SCHEMA_VERSION = 5
+private const val CACHE_SCHEMA_VERSION = 7
+private const val MAVEN_LICENSE_CACHE_SCHEMA_VERSION = 2
 
 private val defaultRepos = listOf(
     "gradle-plugins",
@@ -271,7 +272,7 @@ internal class WorkspaceLicenseAudit(
         val coordinate = componentCoordinate(component) ?: return null
         if (policy.isInternalComponent(component = component, coordinate = coordinate)) return null
 
-        val packageOverride = policy.packageOverrides[coordinate]
+        val packageOverride = policy.packageOverrideFor(coordinate)
         val resolution = if (packageOverride != null) {
             MavenLicenseResolution(
                 licenses = listOf(packageOverride.license),
@@ -343,6 +344,7 @@ internal class WorkspaceLicenseAudit(
 
         return listOfNotNull(
             baseReason?.takeIf { it.isNotBlank() },
+            evaluation.policyNotes.takeIf { it.isNotEmpty() }?.joinToString(" | "),
             waiver?.let { "repo waiver -> ${it.decision.name.lowercase()} by ${it.owner} until ${it.expires}: ${it.reason}" },
         ).joinToString("; ").takeIf { it.isNotBlank() }
     }
@@ -563,15 +565,17 @@ internal class LicenseClassifier(
                 displayLicenses = emptyList(),
                 allowedLicenses = emptyList(),
                 reason = "no license metadata found",
+                policyNotes = emptyList(),
             )
         }
 
         val evaluatedStatements = statements.map(::evaluateStatement)
         val overall = when {
-            evaluatedStatements.any { it.status == Status.DENY } -> Status.DENY
+            evaluatedStatements.any { it.status == Status.ALLOW } -> Status.ALLOW
             evaluatedStatements.any { it.status == Status.REVIEW } -> Status.REVIEW
             evaluatedStatements.any { it.status == Status.UNKNOWN } -> Status.UNKNOWN
-            else -> Status.ALLOW
+            evaluatedStatements.any { it.status == Status.DENY } -> Status.DENY
+            else -> Status.UNKNOWN
         }
 
         val displayLicenses = evaluatedStatements
@@ -592,8 +596,17 @@ internal class LicenseClassifier(
                 ?: "license not recognized by workspace policy"
             Status.ALLOW -> ""
         }
+        val policyNotes = evaluatedStatements
+            .flatMap { statement -> statement.policyNotes }
+            .distinct()
 
-        return LicenseEvaluation(status = overall, displayLicenses = displayLicenses, allowedLicenses = allowedLicenses, reason = reason)
+        return LicenseEvaluation(
+            status = overall,
+            displayLicenses = displayLicenses,
+            allowedLicenses = allowedLicenses,
+            reason = reason,
+            policyNotes = policyNotes,
+        )
     }
 
     private fun evaluateStatement(statement: LicenseStatement): LicenseEvaluation {
@@ -603,6 +616,9 @@ internal class LicenseClassifier(
         val allowedLicenses = normalized
             .filter { normalizedValue -> policy.statusFor(normalizedValue) == Status.ALLOW }
             .map { normalizedValue -> normalizedValue.canonical ?: normalizedValue.display }
+            .distinct()
+        val policyNotes = normalized
+            .mapNotNull(policy::noteFor)
             .distinct()
 
         val status = when (statement.operator) {
@@ -623,6 +639,7 @@ internal class LicenseClassifier(
             displayLicenses = displayLicenses,
             allowedLicenses = if (status == Status.ALLOW) allowedLicenses else emptyList(),
             reason = reason,
+            policyNotes = policyNotes,
         )
     }
 
@@ -648,7 +665,7 @@ internal class LicenseClassifier(
         statuses.any { it == Status.DENY } -> Status.REVIEW
         statuses.any { it == Status.REVIEW } -> Status.REVIEW
         statuses.any { it == Status.UNKNOWN } -> Status.UNKNOWN
-        statuses.any { it == Status.ALLOW } -> Status.ALLOW
+        statuses.all { it == Status.ALLOW } -> Status.ALLOW
         else -> Status.UNKNOWN
     }
 
@@ -756,6 +773,7 @@ internal class MavenLicenseResolver(
         cachePath.parent.createDirectories()
         val json = JSONObject(
             mapOf(
+                "schemaVersion" to MAVEN_LICENSE_CACHE_SCHEMA_VERSION,
                 "entries" to JSONObject(
                     cache.entries.associate { (key, value) ->
                         key to JSONObject(
@@ -818,6 +836,11 @@ internal class MavenLicenseResolver(
         if (!cachePath.exists()) return
         runCatching {
             val json = JSONObject(cachePath.readText())
+            if (json.optInt("schemaVersion") != MAVEN_LICENSE_CACHE_SCHEMA_VERSION) {
+                cache.clear()
+                dirty = true
+                return@runCatching
+            }
             val entries = json.optJSONObject("entries") ?: return@runCatching
             entries.keys().forEach { key ->
                 val entry = entries.optJSONObject(key) ?: return@forEach
@@ -915,11 +938,14 @@ internal data class LicensePolicy(
     val review: Set<String>,
     val denied: Set<String>,
     val aliases: Map<String, String>,
-    val packageOverrides: Map<String, PackageOverride>,
+    val licenseNotes: Map<String, String>,
+    val packageOverrides: List<PackageOverride>,
     val internalGroups: List<String>,
     val repoPolicyFile: String,
     val allowRepoOverrideOfDenied: Boolean,
 ) {
+
+    private val normalizedAliases = aliases.mapKeys { (key, _) -> normalizeAliasKey(key) }
 
     fun normalizeLicense(rawValue: String): NormalizedLicense {
         val candidate = rawValue.trim()
@@ -927,6 +953,7 @@ internal data class LicensePolicy(
 
         val canonical = when {
             aliases.containsKey(candidate) -> aliases.getValue(candidate)
+            normalizedAliases.containsKey(normalizeAliasKey(candidate)) -> normalizedAliases.getValue(normalizeAliasKey(candidate))
             candidate in allowed || candidate in review || candidate in denied -> candidate
             candidate.startsWith("LicenseRef-") -> candidate
             looksLikeLicenseIdentifier(candidate) -> candidate
@@ -952,7 +979,21 @@ internal data class LicensePolicy(
         }
     }
 
+    fun packageOverrideFor(coordinate: String): PackageOverride? = packageOverrides.firstOrNull { override ->
+        override.`package` == coordinate || override.packagePrefix?.let(coordinate::startsWith) == true
+    }
+
+    fun noteFor(license: NormalizedLicense): String? {
+        val key = license.canonical ?: return null
+        return licenseNotes[key]
+    }
+
     private fun looksLikeLicenseIdentifier(value: String) = value.matches(Regex("[A-Za-z0-9.+-]+"))
+
+    private fun normalizeAliasKey(value: String) = value
+        .trim()
+        .lowercase()
+        .replace(Regex("\\s+"), " ")
 
     private fun looksProprietary(value: String): Boolean {
         val normalized = value.lowercase()
@@ -965,7 +1006,8 @@ internal data class LicensePolicy(
             review = stringSet(map["review"]),
             denied = stringSet(map["deny"]),
             aliases = stringMap(map["aliases"]),
-            packageOverrides = packageOverrideMap(map["package_overrides"]),
+            licenseNotes = stringMap(map["license_notes"]),
+            packageOverrides = packageOverrideList(map["package_overrides"]),
             internalGroups = stringList(map["internal_groups"]),
             repoPolicyFile = mapValue(map["waiver_policy"])["repo_policy_file"]?.toString() ?: "license-waivers.yml",
             allowRepoOverrideOfDenied = mapValue(map["waiver_policy"])["allow_repo_override_of_denied"] == true,
@@ -982,14 +1024,16 @@ internal data class LicensePolicy(
                 stringKey to stringValue
             }.toMap()
 
-        private fun packageOverrideMap(value: Any?): Map<String, PackageOverride> =
+        private fun packageOverrideList(value: Any?): List<PackageOverride> =
             listValue(value).mapNotNull { entry ->
                 val overrideMap = mapValue(entry)
-                val pkg = overrideMap["package"] as? String ?: return@mapNotNull null
+                val pkg = overrideMap["package"] as? String
+                val packagePrefix = overrideMap["package_prefix"] as? String
+                if (pkg == null && packagePrefix == null) return@mapNotNull null
                 val license = overrideMap["license"] as? String ?: return@mapNotNull null
                 val reason = overrideMap["reason"] as? String ?: return@mapNotNull null
-                pkg to PackageOverride(`package` = pkg, license = license, reason = reason)
-            }.toMap()
+                PackageOverride(`package` = pkg, packagePrefix = packagePrefix, license = license, reason = reason)
+            }
 
         private fun listValue(value: Any?) = (value as? List<*>)?.toList().orEmpty()
 
@@ -1041,7 +1085,8 @@ internal data class MavenLicenseResolution(
 )
 
 internal data class PackageOverride(
-    val `package`: String,
+    val `package`: String? = null,
+    val packagePrefix: String? = null,
     val license: String,
     val reason: String,
 )
@@ -1068,6 +1113,7 @@ internal data class LicenseEvaluation(
     val displayLicenses: List<String>,
     val allowedLicenses: List<String>,
     val reason: String,
+    val policyNotes: List<String>,
 )
 
 internal data class ComponentAuditResult(
