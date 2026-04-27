@@ -23,7 +23,7 @@ import kotlin.io.path.relativeTo
 import kotlin.io.path.walk
 import kotlin.system.exitProcess
 
-private const val CACHE_SCHEMA_VERSION = 7
+private const val CACHE_SCHEMA_VERSION = 8
 private const val MAVEN_LICENSE_CACHE_SCHEMA_VERSION = 2
 
 private val defaultRepos = listOf(
@@ -67,10 +67,12 @@ internal class WorkspaceLicenseAudit(
     private val policy = LicensePolicy.from(loadMap(workspaceRoot.resolve("policy/license-policy.yml")))
     private val classifier = LicenseClassifier(policy)
     private val licenseResolver = MavenLicenseResolver(workspaceRoot = workspaceRoot)
-    private val sharedFingerprintInputs = listOf(
-        workspaceRoot.resolve("policy/license-policy.yml"),
+    private val dependencyFingerprintInputs = listOf(
         workspaceRoot.resolve("scripts/cyclonedx-init.gradle"),
-        workspaceRoot.resolve("scripts/run-generate-sbom.sh"),
+        workspaceRoot.resolve("scripts/run-generate-license-snapshot.sh"),
+    )
+    private val policyFingerprintInputs = listOf(
+        workspaceRoot.resolve("policy/license-policy.yml"),
         workspaceRoot.resolve("tools/modules/license-audit/app/src/main/kotlin/sollecitom/tools/license_audit/app/LicenseAudit.kt"),
     )
 
@@ -95,19 +97,40 @@ internal class WorkspaceLicenseAudit(
         require(repoPath.isDirectory()) { "Missing repo directory: $repoPath" }
 
         val cachePath = repoPath.resolve("build/reports/license-audit/state.json")
-        val inputFingerprint = computeInputFingerprint(repoPath)
+        val dependencyFingerprint = computeDependencyFingerprint(repoPath)
+        val policyFingerprint = computePolicyFingerprint(repoPath)
         val cachedState = loadCacheState(cachePath)
+        val waivers = loadWaivers(repoPath, warnings)
 
-        if (!force && cachedState?.schemaVersion == CACHE_SCHEMA_VERSION && cachedState.inputFingerprint == inputFingerprint) {
-            out("Skipping SBOM for $repo; dependency inputs unchanged.")
-        return RepoAuditResult(findings = cachedState.findings, allowedLicenseCounts = cachedState.allowedLicenseCounts)
+        if (!force &&
+            cachedState?.schemaVersion == CACHE_SCHEMA_VERSION &&
+            cachedState.dependencyFingerprint == dependencyFingerprint &&
+            cachedState.policyFingerprint == policyFingerprint
+        ) {
+            out("Skipping dependency snapshot for $repo; dependency and policy inputs unchanged.")
+            return RepoAuditResult(findings = cachedState.findings, allowedLicenseCounts = cachedState.allowedLicenseCounts)
         }
 
-        generateSbom(repo, repoPath)
-        val repoSbom = assembleRepoSbom(repo, repoPath)
-        val waivers = loadWaivers(repoPath, warnings)
-        val evaluation = evaluateRepo(repo = repo, repoSbom = repoSbom, waivers = waivers)
-        val sbomFingerprint = computeSbomFingerprint(repoSbom.document)
+        val snapshot = when {
+            force || cachedState == null || cachedState.dependencyFingerprint != dependencyFingerprint -> {
+                generateDependencySnapshot(repo, repoPath)
+                loadDependencySnapshot(repoPath)
+            }
+            cachedState.snapshot != null -> cachedState.snapshot
+            else -> {
+                generateDependencySnapshot(repo, repoPath)
+                loadDependencySnapshot(repoPath)
+            }
+        }
+
+        val evaluation = evaluateRepoFromSnapshot(
+            repo = repo,
+            snapshot = snapshot,
+            waivers = waivers,
+            cachedState = if (force) null else cachedState,
+            policyFingerprintChanged = cachedState?.policyFingerprint != policyFingerprint,
+        )
+        val snapshotFingerprint = computeSnapshotFingerprint(snapshot)
         val outcomeFingerprint = computeOutcomeFingerprint(evaluation.findings, evaluation.allowedLicenseCounts)
 
         if (!force && cachedState?.schemaVersion == CACHE_SCHEMA_VERSION && cachedState.outcomeFingerprint == outcomeFingerprint) {
@@ -118,9 +141,12 @@ internal class WorkspaceLicenseAudit(
             cachePath = cachePath,
             state = CachedRepoState(
                 schemaVersion = CACHE_SCHEMA_VERSION,
-                inputFingerprint = inputFingerprint,
-                sbomFingerprint = sbomFingerprint,
+                dependencyFingerprint = dependencyFingerprint,
+                policyFingerprint = policyFingerprint,
+                snapshotFingerprint = snapshotFingerprint,
                 outcomeFingerprint = outcomeFingerprint,
+                snapshot = snapshot,
+                components = evaluation.components,
                 findings = evaluation.findings,
                 allowedLicenseCounts = evaluation.allowedLicenseCounts,
             )
@@ -129,14 +155,21 @@ internal class WorkspaceLicenseAudit(
         return RepoAuditResult(findings = evaluation.findings, allowedLicenseCounts = evaluation.allowedLicenseCounts)
     }
 
-    private fun computeInputFingerprint(repoPath: java.nio.file.Path): String {
+    private fun computeDependencyFingerprint(repoPath: java.nio.file.Path): String {
         val files = linkedSetOf<java.nio.file.Path>()
-        files += sharedFingerprintInputs.filter { path -> path.exists() }
-        files += repoInputFiles(repoPath)
+        files += dependencyFingerprintInputs.filter { path -> path.exists() }
+        files += repoDependencyInputFiles(repoPath)
         return sha256OfFiles(basePath = workspaceRoot, files = files)
     }
 
-    private fun repoInputFiles(repoPath: java.nio.file.Path): List<java.nio.file.Path> {
+    private fun computePolicyFingerprint(repoPath: java.nio.file.Path): String {
+        val files = linkedSetOf<java.nio.file.Path>()
+        files += policyFingerprintInputs.filter { path -> path.exists() }
+        files += repoPolicyInputFiles(repoPath)
+        return sha256OfFiles(basePath = workspaceRoot, files = files)
+    }
+
+    private fun repoDependencyInputFiles(repoPath: java.nio.file.Path): List<java.nio.file.Path> {
         val includedNames = setOf(
             "build.gradle.kts",
             "build.gradle",
@@ -145,7 +178,6 @@ internal class WorkspaceLicenseAudit(
             "gradle.properties",
             "libs.versions.toml",
             "container-versions.properties",
-            policy.repoPolicyFile,
         )
 
         return repoPath.walk()
@@ -159,132 +191,127 @@ internal class WorkspaceLicenseAudit(
             .toList()
     }
 
-    private fun generateSbom(repo: String, repoPath: java.nio.file.Path) {
-        out("Generating SBOM for $repo")
-        runCommand(repoPath, listOf("just", "generate-sbom"))
+    private fun repoPolicyInputFiles(repoPath: java.nio.file.Path): List<java.nio.file.Path> = listOfNotNull(
+        repoPath.resolve(policy.repoPolicyFile).takeIf { it.exists() }
+    )
+
+    private fun generateDependencySnapshot(repo: String, repoPath: java.nio.file.Path) {
+        out("Generating dependency snapshot for $repo")
+        runCommand(repoPath, listOf("bash", "../scripts/run-generate-license-snapshot.sh", repo))
     }
 
-    private fun assembleRepoSbom(repo: String, repoPath: java.nio.file.Path): RepoSbom {
-        val directFiles = repoPath.walk()
-            .filter { path -> path.name == "direct-cyclonedx.json" }
-            .sortedBy { path -> path.relativeTo(repoPath).toString() }
-            .toList()
-
-        val outputPath = repoPath.resolve("build/reports/sbom/cyclonedx.json")
-        outputPath.parent.createDirectories()
-
-        if (directFiles.isEmpty()) {
-            require(outputPath.exists()) { "Expected direct SBOMs or aggregate SBOM for $repo under $repoPath" }
-            return RepoSbom(path = outputPath, document = JSONObject(outputPath.readText()))
-        }
-
-        val merged = linkedMapOf<String, JSONObject>()
-        directFiles.forEach { directFile ->
-            val parsed = JSONObject(directFile.readText())
-            val components = parsed.optJSONArray("components") ?: JSONArray()
-            repeat(components.length()) { index ->
-                val component = components.optJSONObject(index) ?: return@repeat
-                merged.putIfAbsent(componentKey(component), JSONObject(component.toString()))
-            }
-        }
-
-        val document = JSONObject(
-            mapOf(
-                "bomFormat" to "CycloneDX",
-                "specVersion" to "1.6",
-                "serialNumber" to "urn:uuid:${UUID.randomUUID()}",
-                "version" to 1,
-                "metadata" to JSONObject(
-                    mapOf(
-                        "timestamp" to Instant.now().toString(),
-                        "tools" to JSONArray(
-                            listOf(
-                                JSONObject(
-                                    mapOf(
-                                        "vendor" to "workspace",
-                                        "name" to "tools-license-audit-app",
-                                        "version" to CACHE_SCHEMA_VERSION.toString(),
-                                    )
-                                )
-                            )
-                        ),
-                        "component" to JSONObject(
-                            mapOf(
-                                "type" to "application",
-                                "name" to repo,
-                            )
-                        ),
+    private fun loadDependencySnapshot(repoPath: java.nio.file.Path): DependencySnapshot {
+        val path = repoPath.resolve("build/reports/license-audit/dependency-snapshot.json")
+        require(path.exists()) { "Expected dependency snapshot at $path" }
+        val json = JSONObject(path.readText())
+        val components = json.optJSONArray("components") ?: JSONArray()
+        return DependencySnapshot(
+            repo = json.optString("repo").ifBlank { repoPath.name },
+            components = buildList {
+                repeat(components.length()) { index ->
+                    val component = components.optJSONObject(index) ?: return@repeat
+                    add(
+                        SnapshotComponent(
+                            coordinate = component.getString("coordinate"),
+                            configurations = component.optJSONArray("configurations")?.let { configurationArray ->
+                                buildList {
+                                    repeat(configurationArray.length()) { configurationIndex ->
+                                        configurationArray.optString(configurationIndex).takeIf { it.isNotBlank() }?.let(::add)
+                                    }
+                                }
+                            }.orEmpty().sorted(),
+                        )
                     )
-                ),
-                "components" to JSONArray(
-                    merged.values
-                        .sortedBy(::componentKey)
-                        .map { component -> JSONObject(component.toString()) }
-                ),
-            )
+                }
+            }.sortedBy { it.coordinate },
         )
-
-        outputPath.outputStream().use { output -> output.writer().use { writer -> writer.write(document.toString(2) + "\n") } }
-        return RepoSbom(path = outputPath, document = document)
     }
 
-    private fun componentKey(component: JSONObject) = component.optString("bom-ref").ifBlank {
-        component.optString("purl").ifBlank {
-            listOf(
-                component.optString("group"),
-                component.optString("name"),
-                component.optString("version"),
-            ).joinToString(":")
+    private fun evaluateRepoFromSnapshot(
+        repo: String,
+        snapshot: DependencySnapshot,
+        waivers: List<Waiver>,
+        cachedState: CachedRepoState?,
+        policyFingerprintChanged: Boolean,
+    ): RepoEvaluation {
+        val cachedComponentsByCoordinate = cachedState?.components?.associateBy { it.coordinate }.orEmpty()
+        val currentComponentsByCoordinate = snapshot.components.associateBy { it.coordinate }
+
+        val changedCoordinates = when {
+            force || cachedState == null -> currentComponentsByCoordinate.keys
+            policyFingerprintChanged -> currentComponentsByCoordinate.keys
+            else -> currentComponentsByCoordinate.keys.filter { coordinate ->
+                cachedComponentsByCoordinate[coordinate]?.configurations != currentComponentsByCoordinate[coordinate]?.configurations
+            }.toSet()
         }
-    }
 
-    private fun computeSbomFingerprint(document: JSONObject): String {
-        val components = document.optJSONArray("components") ?: JSONArray()
-        val normalized = buildList {
-            repeat(components.length()) { index ->
-                val component = components.optJSONObject(index) ?: return@repeat
-                val licenses = rawLicenseStatements(component)
-                    .flatMap { statement -> statement.licenses }
-                    .sorted()
-                    .joinToString("|")
-                add("${componentCoordinate(component).orEmpty()}::$licenses")
+        val reusedComponents = currentComponentsByCoordinate.keys
+            .asSequence()
+            .filter { coordinate -> coordinate !in changedCoordinates }
+            .mapNotNull { coordinate -> cachedComponentsByCoordinate[coordinate]?.let { component -> coordinate to component } }
+            .toMap()
+
+        val reevaluatedComponents = currentComponentsByCoordinate.keys
+            .asSequence()
+            .filter { coordinate -> coordinate in changedCoordinates }
+            .mapNotNull { coordinate ->
+                val snapshotComponent = currentComponentsByCoordinate.getValue(coordinate)
+                val cachedComponent = cachedComponentsByCoordinate[coordinate]
+                evaluateCoordinate(
+                    repo = repo,
+                    snapshotComponent = snapshotComponent,
+                    waivers = waivers,
+                    cachedComponent = if (policyFingerprintChanged && cachedComponent != null) cachedComponent else null,
+                )
             }
-        }.sorted().joinToString("\n")
-        return sha256(normalized)
+            .associateBy { component -> component.coordinate }
+
+        val components = (reusedComponents + reevaluatedComponents)
+            .values
+            .sortedBy { component -> component.coordinate }
+        val findings = components.mapNotNull { component -> component.finding }
+        val allowedLicenseCounts = components
+            .flatMap { component -> component.allowedLicenses }
+            .groupingBy { license -> license }
+            .eachCount()
+            .toSortedMap()
+
+        return RepoEvaluation(
+            findings = findings,
+            allowedLicenseCounts = allowedLicenseCounts,
+            components = components,
+        )
     }
 
-    private fun evaluateRepo(repo: String, repoSbom: RepoSbom, waivers: List<Waiver>): RepoEvaluation {
-        val components = repoSbom.document.optJSONArray("components") ?: JSONArray()
-        val findings = mutableListOf<Finding>()
-        val allowedCounts = mutableMapOf<String, Int>()
-        repeat(components.length()) { index ->
-            val component = components.optJSONObject(index) ?: return@repeat
-            val result = evaluateComponent(repo = repo, component = component, waivers = waivers) ?: return@repeat
-            result.finding?.let(findings::add)
-            result.allowedLicenses.forEach { license ->
-                allowedCounts[license] = (allowedCounts[license] ?: 0) + 1
-            }
-        }
-        return RepoEvaluation(findings = findings, allowedLicenseCounts = allowedCounts.toSortedMap())
-    }
+    private fun evaluateCoordinate(
+        repo: String,
+        snapshotComponent: SnapshotComponent,
+        waivers: List<Waiver>,
+        cachedComponent: CachedComponentState?,
+    ): CachedComponentState? {
+        val coordinate = snapshotComponent.coordinate
+        if (policy.isInternalCoordinate(coordinate)) return null
 
-    private fun evaluateComponent(repo: String, component: JSONObject, waivers: List<Waiver>): ComponentAuditResult? {
-        val coordinate = componentCoordinate(component) ?: return null
-        if (policy.isInternalComponent(component = component, coordinate = coordinate)) return null
-
-        val packageOverride = policy.packageOverrideFor(coordinate)
-        val resolution = if (packageOverride != null) {
+        val resolution = if (cachedComponent != null) {
             MavenLicenseResolution(
-                licenses = listOf(packageOverride.license),
-                source = "policy-override",
-                detail = "workspace policy override: ${packageOverride.reason}",
+                licenses = cachedComponent.rawLicenses,
+                source = cachedComponent.resolutionSource,
+                detail = cachedComponent.resolutionDetail,
             )
         } else {
-            licenseResolver.resolve(component)
+            val packageOverride = policy.packageOverrideFor(coordinate)
+            if (packageOverride != null) {
+                MavenLicenseResolution(
+                    licenses = listOf(packageOverride.license),
+                    source = "policy-override",
+                    detail = "workspace policy override: ${packageOverride.reason}",
+                )
+            } else {
+                licenseResolver.resolveCoordinate(coordinate)
+            }
         }
-        val statements = rawLicenseStatements(component).ifEmpty {
-            resolution.licenses.map(LicenseStatement::single)
-        }
+
+        val statements = resolution.licenses.map(LicenseStatement::single)
         val evaluation = classifier.classify(statements)
         val waived = applyWaiver(
             status = evaluation.status,
@@ -293,27 +320,41 @@ internal class WorkspaceLicenseAudit(
             waivers = waivers,
         )
         val status = waived.status
-
-        return if (status == Status.ALLOW) {
-            ComponentAuditResult(finding = null, allowedLicenses = evaluation.allowedLicenses)
+        val finding = if (status == Status.ALLOW) {
+            null
         } else {
-            val detail = findingDetail(
+            Finding(
                 status = status,
-                evaluation = evaluation,
-                resolution = resolution,
-                waiver = waived.waiver,
-            )
-            ComponentAuditResult(
-                finding = Finding(
+                repo = repo,
+                component = coordinate,
+                license = evaluation.displayLicenses.ifEmpty { listOf("(missing)") }.joinToString(" | "),
+                detail = findingDetail(
                     status = status,
-                    repo = repo,
-                    component = coordinate,
-                    license = evaluation.displayLicenses.ifEmpty { listOf("(missing)") }.joinToString(" | "),
-                    detail = detail,
+                    evaluation = evaluation,
+                    resolution = resolution,
+                    waiver = waived.waiver,
                 ),
-                allowedLicenses = emptyList(),
             )
         }
+
+        return CachedComponentState(
+            coordinate = coordinate,
+            configurations = snapshotComponent.configurations,
+            rawLicenses = resolution.licenses,
+            resolutionSource = resolution.source,
+            resolutionDetail = resolution.detail,
+            allowedLicenses = if (status == Status.ALLOW) evaluation.allowedLicenses else emptyList(),
+            finding = finding,
+        )
+    }
+
+    private fun computeSnapshotFingerprint(snapshot: DependencySnapshot): String {
+        val normalized = snapshot.components
+            .sortedBy { component -> component.coordinate }
+            .joinToString("\n") { component ->
+                "${component.coordinate}|${component.configurations.sorted().joinToString(",")}"
+            }
+        return sha256(normalized)
     }
 
     private fun findingDetail(
@@ -360,34 +401,6 @@ internal class WorkspaceLicenseAudit(
         return WaiverDecision(status = waiver.decision, waiver = waiver)
     }
 
-    private fun rawLicenseStatements(component: JSONObject): List<LicenseStatement> {
-        val licenses = component.optJSONArray("licenses") ?: return emptyList()
-        return buildList {
-            repeat(licenses.length()) { index ->
-                val entry = licenses.optJSONObject(index) ?: return@repeat
-                val license = entry.optJSONObject("license")
-                val expression = entry.optString("expression").trim()
-                when {
-                    expression.isNotEmpty() -> add(LicenseStatement.fromExpression(expression))
-                    license != null -> {
-                        val id = license.optString("id").trim()
-                        val name = license.optString("name").trim()
-                        listOf(id, name).filter { it.isNotEmpty() }.distinct().forEach { value -> add(LicenseStatement.single(value)) }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun componentCoordinate(component: JSONObject): String? =
-        component.optString("purl").takeIf { it.isNotBlank() }
-            ?: run {
-                val group = component.optString("group")
-                val name = component.optString("name")
-                val version = component.optString("version")
-                if (name.isBlank()) null else listOf(group, name, version).filter { it.isNotBlank() }.joinToString(":")
-            }
-
     private fun loadWaivers(repoPath: java.nio.file.Path, warnings: MutableList<String>): List<Waiver> {
         val waiverPath = repoPath.resolve(policy.repoPolicyFile)
         if (!waiverPath.exists()) return emptyList()
@@ -431,22 +444,33 @@ internal class WorkspaceLicenseAudit(
             val json = JSONObject(cachePath.readText())
             CachedRepoState(
                 schemaVersion = json.optInt("schemaVersion"),
-                inputFingerprint = json.optString("inputFingerprint"),
-                sbomFingerprint = json.optString("sbomFingerprint"),
+                dependencyFingerprint = json.optString("dependencyFingerprint"),
+                policyFingerprint = json.optString("policyFingerprint"),
+                snapshotFingerprint = json.optString("snapshotFingerprint"),
                 outcomeFingerprint = json.optString("outcomeFingerprint"),
+                snapshot = json.optJSONObject("snapshot")?.let(::snapshotFromJson),
+                components = json.optJSONArray("components")?.let { componentArray ->
+                    buildList {
+                        repeat(componentArray.length()) { index ->
+                            val component = componentArray.optJSONObject(index) ?: return@repeat
+                            add(
+                                CachedComponentState(
+                                    coordinate = component.getString("coordinate"),
+                                    configurations = component.optJSONArray("configurations")?.toStringList().orEmpty(),
+                                    rawLicenses = component.optJSONArray("rawLicenses")?.toStringList().orEmpty(),
+                                    resolutionSource = component.optString("resolutionSource"),
+                                    resolutionDetail = component.optString("resolutionDetail").takeIf { it.isNotBlank() },
+                                    allowedLicenses = component.optJSONArray("allowedLicenses")?.toStringList().orEmpty(),
+                                    finding = component.optJSONObject("finding")?.let(::findingFromJson),
+                                )
+                            )
+                        }
+                    }
+                }.orEmpty(),
                 findings = json.optJSONArray("findings")?.let { findingsArray ->
                     buildList {
                         repeat(findingsArray.length()) { index ->
-                            val finding = findingsArray.optJSONObject(index) ?: return@repeat
-                            add(
-                                Finding(
-                                    status = Status.valueOf(finding.getString("status")),
-                                    repo = finding.getString("repo"),
-                                    component = finding.getString("component"),
-                                    license = finding.getString("license"),
-                                    detail = finding.optString("detail").takeIf { it.isNotBlank() },
-                                )
-                            )
+                            findingsArray.optJSONObject(index)?.let(::findingFromJson)?.let(::add)
                         }
                     }
                 }.orEmpty(),
@@ -463,26 +487,90 @@ internal class WorkspaceLicenseAudit(
             mapOf(
                 "schemaVersion" to state.schemaVersion,
                 "generatedAt" to Instant.now().toString(),
-                "inputFingerprint" to state.inputFingerprint,
-                "sbomFingerprint" to state.sbomFingerprint,
+                "dependencyFingerprint" to state.dependencyFingerprint,
+                "policyFingerprint" to state.policyFingerprint,
+                "snapshotFingerprint" to state.snapshotFingerprint,
                 "outcomeFingerprint" to state.outcomeFingerprint,
-                "allowedLicenseCounts" to JSONObject(state.allowedLicenseCounts),
-                "findings" to JSONArray(
-                    state.findings.map { finding ->
+                "snapshot" to state.snapshot?.let(::snapshotToJson),
+                "components" to JSONArray(
+                    state.components.map { component ->
                         JSONObject(
                             mapOf(
-                                "status" to finding.status.name,
-                                "repo" to finding.repo,
-                                "component" to finding.component,
-                                "license" to finding.license,
-                                "detail" to finding.detail,
+                                "coordinate" to component.coordinate,
+                                "configurations" to JSONArray(component.configurations),
+                                "rawLicenses" to JSONArray(component.rawLicenses),
+                                "resolutionSource" to component.resolutionSource,
+                                "resolutionDetail" to component.resolutionDetail,
+                                "allowedLicenses" to JSONArray(component.allowedLicenses),
+                                "finding" to component.finding?.let(::findingToJson),
                             )
                         )
                     }
                 ),
+                "allowedLicenseCounts" to JSONObject(state.allowedLicenseCounts),
+                "findings" to JSONArray(
+                    state.findings.map(::findingToJson)
+                ),
             )
         )
         cachePath.outputStream().use { output -> output.writer().use { writer -> writer.write(json.toString(2) + "\n") } }
+    }
+
+    private fun snapshotFromJson(json: JSONObject): DependencySnapshot = DependencySnapshot(
+        repo = json.optString("repo"),
+        components = json.optJSONArray("components")?.let { componentArray ->
+            buildList {
+                repeat(componentArray.length()) { index ->
+                    val component = componentArray.optJSONObject(index) ?: return@repeat
+                    add(
+                        SnapshotComponent(
+                            coordinate = component.getString("coordinate"),
+                            configurations = component.optJSONArray("configurations")?.toStringList().orEmpty(),
+                        )
+                    )
+                }
+            }
+        }.orEmpty(),
+    )
+
+    private fun snapshotToJson(snapshot: DependencySnapshot) = JSONObject(
+        mapOf(
+            "repo" to snapshot.repo,
+            "components" to JSONArray(
+                snapshot.components.map { component ->
+                    JSONObject(
+                        mapOf(
+                            "coordinate" to component.coordinate,
+                            "configurations" to JSONArray(component.configurations),
+                        )
+                    )
+                }
+            ),
+        )
+    )
+
+    private fun findingFromJson(json: JSONObject) = Finding(
+        status = Status.valueOf(json.getString("status")),
+        repo = json.getString("repo"),
+        component = json.getString("component"),
+        license = json.getString("license"),
+        detail = json.optString("detail").takeIf { it.isNotBlank() },
+    )
+
+    private fun findingToJson(finding: Finding) = JSONObject(
+        mapOf(
+            "status" to finding.status.name,
+            "repo" to finding.repo,
+            "component" to finding.component,
+            "license" to finding.license,
+            "detail" to finding.detail,
+        )
+    )
+
+    private fun JSONArray.toStringList(): List<String> = buildList {
+        repeat(length()) { index ->
+            optString(index).takeIf { it.isNotBlank() }?.let(::add)
+        }
     }
 
     private fun printWarnings(warnings: List<String>) {
@@ -505,10 +593,12 @@ internal class WorkspaceLicenseAudit(
             return
         }
 
-        findings.sortedWith(compareBy<Finding> { it.status.rank }.thenBy { it.repo }.thenBy { it.component }.thenBy { it.license })
-            .forEach { finding ->
-                val detailSuffix = finding.detail?.let { " [$it]" }.orEmpty()
-                out("%-7s %-24s %-56s %s%s".format(finding.status.name, finding.repo, finding.component, finding.license, detailSuffix))
+        Status.entries
+            .filter { status -> findings.any { finding -> finding.status == status } }
+            .forEachIndexed { index, status ->
+                if (index > 0) out("")
+                out(status.name)
+                printFindingsForStatus(findings.filter { finding -> finding.status == status })
             }
 
         val byStatus = findings.groupBy { it.status }
@@ -517,6 +607,41 @@ internal class WorkspaceLicenseAudit(
         out("- denied: ${byStatus[Status.DENY]?.size ?: 0}")
         out("- review: ${byStatus[Status.REVIEW]?.size ?: 0}")
         out("- unknown: ${byStatus[Status.UNKNOWN]?.size ?: 0}")
+    }
+
+    private fun printFindingsForStatus(findings: List<Finding>) {
+        findings
+            .sortedWith(compareBy<Finding> { it.license }.thenBy { compactComponent(finding = it) }.thenBy { it.repo })
+            .groupBy { finding -> finding.license }
+            .toSortedMap()
+            .forEach { (license, findingsForLicense) ->
+                out("- $license")
+
+                val distinctDetails = findingsForLicense.mapNotNull { finding -> finding.detail }.distinct()
+                if (distinctDetails.size == 1) {
+                    out("  note: ${distinctDetails.single()}")
+                }
+
+                findingsForLicense
+                    .sortedWith(compareBy<Finding> { compactComponent(finding = it) }.thenBy { it.repo })
+                    .forEach { finding ->
+                        val detailSuffix = when {
+                            distinctDetails.size <= 1 -> ""
+                            finding.detail.isNullOrBlank() -> ""
+                            else -> " [${finding.detail}]"
+                        }
+                        out("  - ${compactComponent(finding)}$detailSuffix")
+                    }
+            }
+    }
+
+    private fun compactComponent(finding: Finding): String {
+        val component = finding.component
+        return if (component.startsWith("pkg:maven/")) {
+            component.removePrefix("pkg:maven/")
+        } else {
+            component
+        }
     }
 
     private fun runCommand(workingDirectory: java.nio.file.Path, command: List<String>) {
@@ -756,16 +881,9 @@ internal class MavenLicenseResolver(
         loadCache()
     }
 
-    fun resolve(component: JSONObject): MavenLicenseResolution {
-        val coordinate = component.optString("purl").takeIf { it.startsWith("pkg:maven/") }?.let(::parsePurl)
-            ?: MavenCoordinate(
-                group = component.optString("group"),
-                artifact = component.optString("name"),
-                version = component.optString("version"),
-            ).takeIf { it.group.isNotBlank() && it.artifact.isNotBlank() && it.version.isNotBlank() }
-            ?: return MavenLicenseResolution(emptyList(), "not-maven")
-
-        return resolveCoordinate(coordinate, linkedSetOf())
+    fun resolveCoordinate(coordinate: String): MavenLicenseResolution {
+        val parsed = parseCoordinate(coordinate) ?: return MavenLicenseResolution(emptyList(), "not-maven")
+        return resolveCoordinate(parsed, linkedSetOf())
     }
 
     fun flush() {
@@ -855,15 +973,13 @@ internal class MavenLicenseResolver(
         }
     }
 
-    private fun parsePurl(purl: String): MavenCoordinate? {
-        val withoutPrefix = purl.removePrefix("pkg:maven/")
-        val nameAndVersion = withoutPrefix.substringAfter("/", missingDelimiterValue = return null)
-        val group = withoutPrefix.substringBefore("/")
-        val artifact = nameAndVersion.substringBefore("@")
-        val version = nameAndVersion.substringAfter("@", missingDelimiterValue = "")
-        return MavenCoordinate(group = group, artifact = artifact, version = version).takeIf {
-            it.group.isNotBlank() && it.artifact.isNotBlank() && it.version.isNotBlank()
-        }
+    private fun parseCoordinate(coordinate: String): MavenCoordinate? {
+        val match = Regex("^pkg:maven/([^/]+)/([^@]+)@(.+)$").matchEntire(coordinate.trim()) ?: return null
+        return MavenCoordinate(
+            group = match.groupValues[1],
+            artifact = match.groupValues[2],
+            version = match.groupValues[3],
+        )
     }
 
     private fun findLocalPom(coordinate: MavenCoordinate): java.nio.file.Path? {
@@ -971,11 +1087,9 @@ internal data class LicensePolicy(
         else -> if (looksProprietary(canonical)) Status.DENY else Status.UNKNOWN
     }
 
-    fun isInternalComponent(component: JSONObject, coordinate: String): Boolean {
-        val group = component.optString("group")
-        val purl = component.optString("purl")
+    fun isInternalCoordinate(coordinate: String): Boolean {
         return internalGroups.any { prefix ->
-            group == prefix || group.startsWith("$prefix.") || coordinate.startsWith("$prefix:") || purl.contains("/$prefix/")
+            coordinate.startsWith("$prefix:") || coordinate.contains("/$prefix/") || coordinate.contains("/$prefix.")
         }
     }
 
@@ -1041,11 +1155,6 @@ internal data class LicensePolicy(
     }
 }
 
-internal data class RepoSbom(
-    val path: java.nio.file.Path,
-    val document: JSONObject,
-)
-
 internal data class RepoAuditResult(
     val findings: List<Finding>,
     val allowedLicenseCounts: Map<String, Int>,
@@ -1053,9 +1162,12 @@ internal data class RepoAuditResult(
 
 internal data class CachedRepoState(
     val schemaVersion: Int,
-    val inputFingerprint: String,
-    val sbomFingerprint: String,
+    val dependencyFingerprint: String,
+    val policyFingerprint: String,
+    val snapshotFingerprint: String,
     val outcomeFingerprint: String,
+    val snapshot: DependencySnapshot?,
+    val components: List<CachedComponentState>,
     val findings: List<Finding>,
     val allowedLicenseCounts: Map<String, Int>,
 )
@@ -1063,6 +1175,27 @@ internal data class CachedRepoState(
 internal data class RepoEvaluation(
     val findings: List<Finding>,
     val allowedLicenseCounts: Map<String, Int>,
+    val components: List<CachedComponentState>,
+)
+
+internal data class DependencySnapshot(
+    val repo: String,
+    val components: List<SnapshotComponent>,
+)
+
+internal data class SnapshotComponent(
+    val coordinate: String,
+    val configurations: List<String>,
+)
+
+internal data class CachedComponentState(
+    val coordinate: String,
+    val configurations: List<String>,
+    val rawLicenses: List<String>,
+    val resolutionSource: String,
+    val resolutionDetail: String?,
+    val allowedLicenses: List<String>,
+    val finding: Finding?,
 )
 
 internal data class MavenCoordinate(
@@ -1114,11 +1247,6 @@ internal data class LicenseEvaluation(
     val allowedLicenses: List<String>,
     val reason: String,
     val policyNotes: List<String>,
-)
-
-internal data class ComponentAuditResult(
-    val finding: Finding?,
-    val allowedLicenses: List<String>,
 )
 
 internal data class WaiverDecision(
