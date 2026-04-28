@@ -43,14 +43,21 @@ private val defaultRepos = listOf(
 fun main(args: Array<String>) {
 
     if (args.isEmpty() || args.first() != "workspace") {
-        System.err.println("Usage: LicenseAudit workspace [--force] [repo ...]")
+        System.err.println("Usage: LicenseAudit workspace [--force] [--compact] [repo ...]")
         exitProcess(2)
     }
 
     val force = args.drop(1).any { it == "--force" } || System.getenv("FORCE_LICENSE_AUDIT") == "1"
+    val compact = args.drop(1).any { it == "--compact" }
     val workspaceRoot = findWorkspaceRoot()
-    val repos = args.drop(1).filterNot { it == "--force" }.ifEmpty { defaultRepos }
-    exitProcess(WorkspaceLicenseAudit(workspaceRoot = workspaceRoot, force = force).run(repos))
+    val repos = args.drop(1).filterNot { it == "--force" || it == "--compact" }.ifEmpty { defaultRepos }
+    exitProcess(
+        WorkspaceLicenseAudit(
+            workspaceRoot = workspaceRoot,
+            force = force,
+            outputMode = if (compact) OutputMode.COMPACT else OutputMode.VERBOSE,
+        ).run(repos)
+    )
 }
 
 private fun findWorkspaceRoot() = generateSequence(Path("").toAbsolutePath().normalize()) { it.parent }
@@ -60,6 +67,7 @@ private fun findWorkspaceRoot() = generateSequence(Path("").toAbsolutePath().nor
 internal class WorkspaceLicenseAudit(
     private val workspaceRoot: java.nio.file.Path,
     private val force: Boolean,
+    private val outputMode: OutputMode,
     private val out: (String) -> Unit = ::println,
 ) {
 
@@ -89,7 +97,7 @@ internal class WorkspaceLicenseAudit(
         printWarnings(warnings)
         printAllowedLicenseCounts(allowedLicenseCounts)
         printFindings(findings)
-        return if (findings.any { it.status == Status.DENY }) 1 else 0
+        return if (findings.any { it.status == Status.DENY || it.status == Status.UNKNOWN }) 1 else 0
     }
 
     private fun processRepo(repo: String, warnings: MutableList<String>): RepoAuditResult {
@@ -107,7 +115,7 @@ internal class WorkspaceLicenseAudit(
             cachedState.dependencyFingerprint == dependencyFingerprint &&
             cachedState.policyFingerprint == policyFingerprint
         ) {
-            out("Skipping dependency snapshot for $repo; dependency and policy inputs unchanged.")
+            logProgress("Skipping dependency snapshot for $repo; dependency and policy inputs unchanged.")
             return RepoAuditResult(findings = cachedState.findings, allowedLicenseCounts = cachedState.allowedLicenseCounts)
         }
 
@@ -134,7 +142,7 @@ internal class WorkspaceLicenseAudit(
         val outcomeFingerprint = computeOutcomeFingerprint(evaluation.findings, evaluation.allowedLicenseCounts)
 
         if (!force && cachedState?.schemaVersion == CACHE_SCHEMA_VERSION && cachedState.outcomeFingerprint == outcomeFingerprint) {
-            out("License outcome unchanged for $repo.")
+            logProgress("License outcome unchanged for $repo.")
         }
 
         writeCacheState(
@@ -196,7 +204,7 @@ internal class WorkspaceLicenseAudit(
     )
 
     private fun generateDependencySnapshot(repo: String, repoPath: java.nio.file.Path) {
-        out("Generating dependency snapshot for $repo")
+        logProgress("Generating dependency snapshot for $repo")
         runCommand(repoPath, listOf("bash", "../scripts/run-generate-license-snapshot.sh", repo))
     }
 
@@ -579,6 +587,7 @@ internal class WorkspaceLicenseAudit(
     }
 
     private fun printAllowedLicenseCounts(allowedLicenseCounts: Map<String, Int>) {
+        if (outputMode == OutputMode.COMPACT) return
         if (allowedLicenseCounts.isEmpty()) return
         out("Allowed licenses:")
         allowedLicenseCounts.toSortedMap().forEach { (license, count) ->
@@ -588,6 +597,11 @@ internal class WorkspaceLicenseAudit(
     }
 
     private fun printFindings(findings: List<Finding>) {
+        if (outputMode == OutputMode.COMPACT) {
+            printCompactFindings(findings)
+            return
+        }
+
         if (findings.isEmpty()) {
             out("License policy passed: no denied, review, or unknown licenses found.")
             return
@@ -607,6 +621,52 @@ internal class WorkspaceLicenseAudit(
         out("- denied: ${byStatus[Status.DENY]?.size ?: 0}")
         out("- review: ${byStatus[Status.REVIEW]?.size ?: 0}")
         out("- unknown: ${byStatus[Status.UNKNOWN]?.size ?: 0}")
+    }
+
+    private fun printCompactFindings(findings: List<Finding>) {
+        if (findings.isEmpty()) {
+            return
+        }
+
+        val denied = findings.filter { it.status == Status.DENY }
+        if (denied.isNotEmpty()) {
+            out("DENY")
+            printCompactCoordinatesByLicense(denied)
+        }
+
+        val unknown = findings.filter { it.status == Status.UNKNOWN }
+        if (unknown.isNotEmpty()) {
+            if (denied.isNotEmpty()) out("")
+            out("UNKNOWN")
+            printCompactCoordinatesByLicense(unknown)
+        }
+
+        val reviewLicenses = findings
+            .filter { it.status == Status.REVIEW }
+            .map { it.license }
+            .distinct()
+            .sorted()
+
+        if (reviewLicenses.isNotEmpty()) {
+            if (denied.isNotEmpty() || unknown.isNotEmpty()) out("")
+            out("REVIEW")
+            reviewLicenses.forEach { license -> out("- $license") }
+        }
+    }
+
+    private fun printCompactCoordinatesByLicense(findings: List<Finding>) {
+        findings
+            .sortedWith(compareBy<Finding> { it.license }.thenBy { compactComponent(finding = it) }.thenBy { it.repo })
+            .groupBy { finding -> finding.license }
+            .toSortedMap()
+            .forEach { (license, findingsForLicense) ->
+                out("- $license")
+                findingsForLicense
+                    .sortedWith(compareBy<Finding> { compactComponent(finding = it) }.thenBy { it.repo })
+                    .forEach { finding ->
+                        out("  - ${compactComponent(finding)}")
+                    }
+            }
     }
 
     private fun printFindingsForStatus(findings: List<Finding>) {
@@ -644,6 +704,12 @@ internal class WorkspaceLicenseAudit(
         }
     }
 
+    private fun logProgress(message: String) {
+        if (outputMode == OutputMode.VERBOSE) {
+            out(message)
+        }
+    }
+
     private fun runCommand(workingDirectory: java.nio.file.Path, command: List<String>) {
         val process = ProcessBuilder(command)
             .directory(workingDirectory.toFile())
@@ -677,6 +743,11 @@ internal class WorkspaceLicenseAudit(
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray())
         .joinToString("") { "%02x".format(it) }
+}
+
+internal enum class OutputMode {
+    VERBOSE,
+    COMPACT,
 }
 
 internal class LicenseClassifier(

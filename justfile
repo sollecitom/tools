@@ -20,6 +20,9 @@ license-audit-workspace +repos:
 license-audit:
     bash ../scripts/run-license-audit.sh tools
 
+license-audit-compact:
+    bash ../scripts/run-license-audit.sh tools --compact
+
 generate-sbom:
     bash ../scripts/run-generate-sbom.sh tools
 
