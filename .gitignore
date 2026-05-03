@@ -38,3 +38,4 @@ workspace.xml
 *.tgz
 Chart.lock
 *.pidjava_pid*.hprof
+.nwave
