@@ -1,11 +1,11 @@
 [versions]
 # libraries
 kotlin = "2.4.0"
-sollecitom-swissknife = "1.0.7"
+sollecitom-swissknife = "1.0.8"
 org-json = "20260522"
 snakeyaml = "2.6"
 # plugins
-sollecitom-gradle-plugins = "1.0.17"
+sollecitom-gradle-plugins = "1.0.18"
 palantir-git-plugin = "5.0.0"
 
 [libraries]
