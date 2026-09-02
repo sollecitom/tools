@@ -5,7 +5,7 @@ sollecitom-swissknife = "1.0.26"
 org-json = "20260814"
 snakeyaml = "2.7"
 # plugins
-sollecitom-gradle-plugins = "1.0.26"
+sollecitom-gradle-plugins = "1.0.27"
 palantir-git-plugin = "5.1.0"
 
 [libraries]
