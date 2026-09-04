@@ -1,7 +1,7 @@
 [versions]
 # libraries
 kotlin = "2.4.10"
-sollecitom-swissknife = "1.0.26"
+sollecitom-swissknife = "1.0.27"
 org-json = "20260814"
 snakeyaml = "2.7"
 # plugins
