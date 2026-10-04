@@ -25,6 +25,8 @@ import kotlin.system.exitProcess
 
 private const val CACHE_SCHEMA_VERSION = 8
 private const val MAVEN_LICENSE_CACHE_SCHEMA_VERSION = 2
+private const val POLICY_OVERRIDE_RESOLUTION_SOURCE = "policy-override"
+private val retriableResolutionSources = setOf("missing", "parent-missing")
 
 private val defaultRepos = listOf(
     "gradle-plugins",
@@ -69,6 +71,7 @@ internal class WorkspaceLicenseAudit(
     private val force: Boolean,
     private val outputMode: OutputMode,
     private val out: (String) -> Unit = ::println,
+    private val today: LocalDate = LocalDate.now(),
 ) {
 
     private val yaml = Yaml()
@@ -106,14 +109,15 @@ internal class WorkspaceLicenseAudit(
 
         val cachePath = repoPath.resolve("build/reports/license-audit/state.json")
         val dependencyFingerprint = computeDependencyFingerprint(repoPath)
-        val policyFingerprint = computePolicyFingerprint(repoPath)
-        val cachedState = loadCacheState(cachePath)
         val waivers = loadWaivers(repoPath, warnings)
+        val policyFingerprint = computePolicyFingerprint(repoPath, waivers)
+        val cachedState = loadCacheState(cachePath)
 
         if (!force &&
             cachedState?.schemaVersion == CACHE_SCHEMA_VERSION &&
             cachedState.dependencyFingerprint == dependencyFingerprint &&
-            cachedState.policyFingerprint == policyFingerprint
+            cachedState.policyFingerprint == policyFingerprint &&
+            cachedState.components.none { it.resolutionSource in retriableResolutionSources }
         ) {
             logProgress("Skipping dependency snapshot for $repo; dependency and policy inputs unchanged.")
             return RepoAuditResult(findings = cachedState.findings, allowedLicenseCounts = cachedState.allowedLicenseCounts)
@@ -170,11 +174,11 @@ internal class WorkspaceLicenseAudit(
         return sha256OfFiles(basePath = workspaceRoot, files = files)
     }
 
-    private fun computePolicyFingerprint(repoPath: java.nio.file.Path): String {
+    private fun computePolicyFingerprint(repoPath: java.nio.file.Path, activeWaivers: List<Waiver>): String {
         val files = linkedSetOf<java.nio.file.Path>()
         files += policyFingerprintInputs.filter { path -> path.exists() }
         files += repoPolicyInputFiles(repoPath)
-        return sha256OfFiles(basePath = workspaceRoot, files = files)
+        return sha256(sha256OfFiles(basePath = workspaceRoot, files = files) + activeWaivers.joinToString())
     }
 
     private fun repoDependencyInputFiles(repoPath: java.nio.file.Path): List<java.nio.file.Path> {
@@ -249,7 +253,8 @@ internal class WorkspaceLicenseAudit(
             force || cachedState == null -> currentComponentsByCoordinate.keys
             policyFingerprintChanged -> currentComponentsByCoordinate.keys
             else -> currentComponentsByCoordinate.keys.filter { coordinate ->
-                cachedComponentsByCoordinate[coordinate]?.configurations != currentComponentsByCoordinate[coordinate]?.configurations
+                cachedComponentsByCoordinate[coordinate]?.configurations != currentComponentsByCoordinate[coordinate]?.configurations ||
+                    cachedComponentsByCoordinate[coordinate]?.resolutionSource in retriableResolutionSources
             }.toSet()
         }
 
@@ -269,7 +274,7 @@ internal class WorkspaceLicenseAudit(
                     repo = repo,
                     snapshotComponent = snapshotComponent,
                     waivers = waivers,
-                    cachedComponent = if (policyFingerprintChanged && cachedComponent != null) cachedComponent else null,
+                    cachedComponent = cachedComponent?.takeIf { policyFingerprintChanged && it.resolutionSource != POLICY_OVERRIDE_RESOLUTION_SOURCE && it.resolutionSource !in retriableResolutionSources },
                 )
             }
             .associateBy { component -> component.coordinate }
@@ -300,23 +305,19 @@ internal class WorkspaceLicenseAudit(
         val coordinate = snapshotComponent.coordinate
         if (policy.isInternalCoordinate(coordinate)) return null
 
-        val resolution = if (cachedComponent != null) {
-            MavenLicenseResolution(
+        val packageOverride = policy.packageOverrideFor(coordinate)
+        val resolution = when {
+            packageOverride != null -> MavenLicenseResolution(
+                licenses = listOf(packageOverride.license),
+                source = POLICY_OVERRIDE_RESOLUTION_SOURCE,
+                detail = "workspace policy override: ${packageOverride.reason}",
+            )
+            cachedComponent != null -> MavenLicenseResolution(
                 licenses = cachedComponent.rawLicenses,
                 source = cachedComponent.resolutionSource,
                 detail = cachedComponent.resolutionDetail,
             )
-        } else {
-            val packageOverride = policy.packageOverrideFor(coordinate)
-            if (packageOverride != null) {
-                MavenLicenseResolution(
-                    licenses = listOf(packageOverride.license),
-                    source = "policy-override",
-                    detail = "workspace policy override: ${packageOverride.reason}",
-                )
-            } else {
-                licenseResolver.resolveCoordinate(coordinate)
-            }
+            else -> licenseResolver.resolveCoordinate(coordinate)
         }
 
         val statements = resolution.licenses.map(LicenseStatement::single)
@@ -422,9 +423,12 @@ internal class WorkspaceLicenseAudit(
                 decision = Status.valueOf(waiverMap["decision"]?.toString()?.uppercase() ?: error("Waiver in $waiverPath is missing decision")),
                 owner = waiverMap["owner"]?.toString() ?: error("Waiver in $waiverPath is missing owner"),
                 reason = waiverMap["reason"]?.toString() ?: error("Waiver in $waiverPath is missing reason"),
-                expires = LocalDate.parse(waiverMap["expires"]?.toString() ?: error("Waiver in $waiverPath is missing expires")),
+                expires = when (val expires = waiverMap["expires"] ?: error("Waiver in $waiverPath is missing expires")) {
+                    is java.util.Date -> expires.toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                    else -> LocalDate.parse(expires.toString())
+                },
             )
-            if (waiver.expires.isBefore(LocalDate.now())) {
+            if (waiver.expires.isBefore(today)) {
                 warnings += "Ignoring expired waiver in ${waiverPath.relativeTo(workspaceRoot)} for ${waiver.`package`} (${waiver.expires})"
                 null
             } else {
@@ -983,7 +987,7 @@ internal class MavenLicenseResolver(
         val key = coordinate.key
         if (!visited.add(key)) return MavenLicenseResolution(emptyList(), "cycle")
         cache[key]?.let { cached ->
-            if (cached.licenses.isNotEmpty() || cached.source !in setOf("missing", "parent-missing")) {
+            if (cached.licenses.isNotEmpty() || cached.source !in retriableResolutionSources) {
                 return MavenLicenseResolution(cached.licenses, cached.source)
             }
         }

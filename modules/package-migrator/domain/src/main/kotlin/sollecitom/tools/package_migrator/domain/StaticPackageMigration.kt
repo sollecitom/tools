@@ -3,7 +3,6 @@ package sollecitom.tools.package_migrator.domain
 import sollecitom.libs.swissknife.logger.core.loggable.Loggable
 import java.io.File
 import java.nio.file.Path
-import java.nio.file.Paths
 import kotlin.io.path.createDirectories
 import kotlin.io.path.moveTo
 import kotlin.io.path.pathString
@@ -21,14 +20,14 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
                     fromPackage.asPath.pathString to toPackage.asPath.pathString
                 )
 
-                takeIf { it.isWithinPackage(fromPackage) }?.movePackage(fromPackage, toPackage)
+                takeIf { it.isWithinPackage(fromPackage, rootDirectory.path) }?.movePackage(fromPackage, toPackage, rootDirectory.path)
             }
         }
         directoriesWithinPackage(fromPackage).forEach {
             if (it.isEmpty) {
                 it.delete()
             } else {
-                it.path.movePackage(fromPackage, toPackage)
+                it.path.movePackage(fromPackage, toPackage, rootDirectory.path)
             }
         }
     }
@@ -39,13 +38,13 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         logger.info { "Deleted directory $this" }
     }
 
-    private val Project.notExcludedFiles get() = rootDirectory.files.filterNot { it.isWithinFolder(excludedFolderNames) }
+    private val Project.notExcludedFiles get() = rootDirectory.files.filterNot { it.isWithinFolder(excludedFolderNames, rootDirectory.path) }
 
-    private fun Project.directoriesWithinPackage(containingPackage: Package): Sequence<Directory> = rootDirectory.directories.filter { it.isWithinPackage(containingPackage) }.sortedByDescending { it.pathString.length }.map(::Directory)
+    private fun Project.directoriesWithinPackage(containingPackage: Package): Sequence<Directory> = rootDirectory.directories.filter { it.isWithinPackage(containingPackage, rootDirectory.path) }.sortedByDescending { it.pathString.length }.map(::Directory)
 
-    private fun Path.movePackage(originalPackage: Package, targetPackage: Package) {
+    private fun Path.movePackage(originalPackage: Package, targetPackage: Package, root: Path) {
 
-        val newPath = pathString.replaceFirst(originalPackage.asPath.pathString, targetPackage.asPath.pathString).let(Paths::get)
+        val newPath = root.relativize(this).pathString.replaceFirst(originalPackage.asPath.pathString, targetPackage.asPath.pathString).let(root::resolve)
         newPath.parent.createDirectories()
         moveTo(newPath)
         logger.info { "Moved $this to $newPath" }
@@ -61,13 +60,13 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         }
     }
 
-    private fun Path.isWithinFolder(folderNames: Set<String>): Boolean {
+    private fun Path.isWithinFolder(folderNames: Set<String>, root: Path): Boolean {
 
-        val segments = pathString.split(File.separator)
+        val segments = root.relativize(this).pathString.split(File.separator)
         return segments.any { it in folderNames }
     }
 
-    private fun Path.isWithinPackage(prospectiveContainingPackage: Package) = pathString.contains(prospectiveContainingPackage.asPath.pathString)
+    private fun Path.isWithinPackage(prospectiveContainingPackage: Package, root: Path) = root.relativize(this).pathString.contains(prospectiveContainingPackage.asPath.pathString)
 
     companion object : Loggable()
 }

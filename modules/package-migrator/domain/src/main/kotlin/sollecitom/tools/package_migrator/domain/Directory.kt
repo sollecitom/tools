@@ -5,7 +5,6 @@ import java.nio.file.Path
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
-import kotlin.streams.asSequence
 
 @JvmInline
 value class Directory(val path: Path) {
@@ -16,7 +15,7 @@ value class Directory(val path: Path) {
 
     val isAbsolute: Boolean get() = path.isAbsolute
 
-    val content: Sequence<Path> get() = Files.walk(path).asSequence()
+    val content: Sequence<Path> get() = Files.walk(path).use { it.toList() }.asSequence()
 
     val files: Sequence<Path> get() = content.filter { it.isRegularFile() }
 
