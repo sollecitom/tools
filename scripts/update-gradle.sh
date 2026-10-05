@@ -20,8 +20,7 @@ updated_checksum=$(curl -fsSL "${updated_url}.sha256")
     --no-validate-url
 
 if grep -q '^validateDistributionUrl=' "$props_file"; then
-    sed -i.bak 's/validateDistributionUrl=.*/validateDistributionUrl=true/' "$props_file"
-    rm "${props_file}.bak"
+    sed -i '' 's/validateDistributionUrl=.*/validateDistributionUrl=true/' "$props_file"
 else
     printf '\nvalidateDistributionUrl=true\n' >> "$props_file"
 fi

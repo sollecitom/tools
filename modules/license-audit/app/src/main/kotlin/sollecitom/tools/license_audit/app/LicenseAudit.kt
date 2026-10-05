@@ -8,6 +8,8 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
+import java.util.Date
 import java.util.UUID
 import kotlin.io.path.Path
 import kotlin.io.path.absolute
@@ -424,7 +426,7 @@ internal class WorkspaceLicenseAudit(
                 owner = waiverMap["owner"]?.toString() ?: error("Waiver in $waiverPath is missing owner"),
                 reason = waiverMap["reason"]?.toString() ?: error("Waiver in $waiverPath is missing reason"),
                 expires = when (val expires = waiverMap["expires"] ?: error("Waiver in $waiverPath is missing expires")) {
-                    is java.util.Date -> expires.toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                    is Date -> expires.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
                     else -> LocalDate.parse(expires.toString())
                 },
             )
