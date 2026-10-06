@@ -24,11 +24,11 @@ class WorkspaceLicenseAuditTests {
         workspace.writePom(license = "Custom License")
         workspace.writeWaiver(expires = "\"2026-01-01\"")
 
-        val resultWhileActive = workspace.audit(today = LocalDate.parse("2026-01-01"))
-        val resultOnceExpired = workspace.audit(today = LocalDate.parse("2026-01-02"))
+        val exitCodeWhileActive = workspace.audit(today = LocalDate.parse("2026-01-01"))
+        val exitCodeOnceExpired = workspace.audit(today = LocalDate.parse("2026-01-02"))
 
-        assertThat(resultWhileActive).isEqualTo(0)
-        assertThat(resultOnceExpired).isEqualTo(1)
+        assertThat(exitCodeWhileActive).isEqualTo(0)
+        assertThat(exitCodeOnceExpired).isEqualTo(1)
     }
 
     @Test
@@ -38,9 +38,9 @@ class WorkspaceLicenseAuditTests {
         workspace.writePom(license = "Custom License")
         workspace.writeWaiver(expires = "2026-01-01")
 
-        val result = workspace.audit(today = LocalDate.parse("2026-01-01"))
+        val exitCode = workspace.audit(today = LocalDate.parse("2026-01-01"))
 
-        assertThat(result).isEqualTo(0)
+        assertThat(exitCode).isEqualTo(0)
     }
 
     @Test
@@ -48,17 +48,17 @@ class WorkspaceLicenseAuditTests {
 
         val workspace = AuditedWorkspace(root)
         workspace.writePom(license = "MIT")
-        val resultWithoutOverride = workspace.audit()
+        val exitCodeWithoutOverride = workspace.audit()
 
         workspace.writePolicy(packageOverridesYaml = "package_overrides:\n  - package: ${AuditedWorkspace.COORDINATE}\n    license: GPL-3.0-only\n    reason: test")
-        val resultWithOverride = workspace.audit()
+        val exitCodeWithOverride = workspace.audit()
 
         workspace.writePolicy()
-        val resultOnceOverrideRemoved = workspace.audit()
+        val exitCodeOnceOverrideRemoved = workspace.audit()
 
-        assertThat(resultWithoutOverride).isEqualTo(0)
-        assertThat(resultWithOverride).isEqualTo(1)
-        assertThat(resultOnceOverrideRemoved).isEqualTo(0)
+        assertThat(exitCodeWithoutOverride).isEqualTo(0)
+        assertThat(exitCodeWithOverride).isEqualTo(1)
+        assertThat(exitCodeOnceOverrideRemoved).isEqualTo(0)
     }
 
     @Test
@@ -69,9 +69,9 @@ class WorkspaceLicenseAuditTests {
         workspace.audit()
         workspace.markCachedComponentAsMissing()
 
-        val result = workspace.audit()
+        val exitCode = workspace.audit()
 
-        assertThat(result).isEqualTo(0)
+        assertThat(exitCode).isEqualTo(0)
     }
 
     private class AuditedWorkspace(private val root: Path) {
@@ -107,7 +107,7 @@ class WorkspaceLicenseAuditTests {
             statePath.writeText(state.toString())
         }
 
-        fun audit(today: LocalDate = LocalDate.now()): Int = WorkspaceLicenseAudit(workspaceRoot = root, force = false, outputMode = OutputMode.COMPACT, out = {}, today = today).run(listOf(REPO))
+        fun audit(today: LocalDate = LocalDate.parse("2026-01-01")): Int = WorkspaceLicenseAudit(workspaceRoot = root, force = false, outputMode = OutputMode.COMPACT, out = {}, today = today).run(listOf(REPO))
 
         companion object {
             const val REPO = "repo"

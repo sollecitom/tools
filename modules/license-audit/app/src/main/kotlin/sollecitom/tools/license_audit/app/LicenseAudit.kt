@@ -30,6 +30,8 @@ private const val MAVEN_LICENSE_CACHE_SCHEMA_VERSION = 2
 private const val POLICY_OVERRIDE_RESOLUTION_SOURCE = "policy-override"
 private val retriableResolutionSources = setOf("missing", "parent-missing")
 
+private val CachedComponentState.isReusableAfterPolicyChange: Boolean get() = resolutionSource != POLICY_OVERRIDE_RESOLUTION_SOURCE && resolutionSource !in retriableResolutionSources
+
 private val defaultRepos = listOf(
     "gradle-plugins",
     "acme-schema-catalogue",
@@ -276,7 +278,7 @@ internal class WorkspaceLicenseAudit(
                     repo = repo,
                     snapshotComponent = snapshotComponent,
                     waivers = waivers,
-                    cachedComponent = cachedComponent?.takeIf { policyFingerprintChanged && it.resolutionSource != POLICY_OVERRIDE_RESOLUTION_SOURCE && it.resolutionSource !in retriableResolutionSources },
+                    cachedComponent = cachedComponent?.takeIf { policyFingerprintChanged && it.isReusableAfterPolicyChange },
                 )
             }
             .associateBy { component -> component.coordinate }
