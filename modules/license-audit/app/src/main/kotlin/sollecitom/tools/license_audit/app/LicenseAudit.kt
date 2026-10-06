@@ -5,7 +5,12 @@ import org.json.JSONObject
 import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
 import java.nio.file.Path
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.security.MessageDigest
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -745,12 +750,12 @@ internal class WorkspaceLicenseAudit(
             digest.update(path.readBytes())
             digest.update(0)
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return digest.digest().toHexString()
     }
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray())
-        .joinToString("") { "%02x".format(it) }
+        .toHexString()
 }
 
 internal enum class OutputMode {
@@ -950,6 +955,7 @@ internal class MavenLicenseResolver(
         )
     }.distinct().filter { it.exists() && it.isDirectory() }
 
+    private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(15)).build()
     private val repositories = listOf(
         "https://repo.maven.apache.org/maven2",
         "https://plugins.gradle.org/m2",
@@ -1085,22 +1091,9 @@ internal class MavenLicenseResolver(
         repositories.forEach { repository ->
             val url = "${repository.trimEnd('/')}/$groupPath/${coordinate.artifact}/${coordinate.version}/${coordinate.artifact}-${coordinate.version}.pom"
             cachedPom.parent.createDirectories()
-            val process = runCatching {
-                ProcessBuilder(
-                    "curl",
-                    "--fail",
-                    "--location",
-                    "--silent",
-                    "--show-error",
-                    "--max-time",
-                    "15",
-                    "--output",
-                    cachedPom.toString(),
-                    url,
-                ).start()
-            }.getOrNull() ?: return@forEach
-            val exitCode = process.waitFor()
-            if (exitCode == 0 && cachedPom.exists()) {
+            val request = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(15)).GET().build()
+            val response = runCatching { httpClient.send(request, HttpResponse.BodyHandlers.ofFile(cachedPom)) }.getOrNull()
+            if (response?.statusCode() == 200 && cachedPom.exists()) {
                 return cachedPom
             }
             cachedPom.toFile().delete()
