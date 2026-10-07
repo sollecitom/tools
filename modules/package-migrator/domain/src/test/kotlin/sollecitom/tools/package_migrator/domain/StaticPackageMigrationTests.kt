@@ -1,6 +1,7 @@
 package sollecitom.tools.package_migrator.domain
 
 import assertk.assertThat
+import assertk.assertions.containsExactly
 import assertk.assertions.isEqualTo
 import assertk.assertions.isFalse
 import assertk.assertions.isTrue
@@ -11,6 +12,8 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
+import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.name
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
@@ -32,6 +35,21 @@ class StaticPackageMigrationTests {
         assertThat(root.resolve("src/main/kotlin/b/d/d/Qux.kt").readText()).isEqualTo("package b.d.d\n")
         assertThat(root.resolve("src/main/kotlin/a/b/common/Bar.kt").readText()).isEqualTo("package a.b.common\n")
         assertThat(root.resolve("src/main/kotlin/a/b/c").exists()).isFalse()
+    }
+
+    @Test
+    fun `a package can be migrated into one of its own subpackages`(@TempDir root: Path) {
+
+        root.file("src/main/kotlin/a/b/Foo.kt", "package a.b\nimport a.b.c.Qux\n")
+        root.file("src/main/kotlin/a/b/c/Qux.kt", "package a.b.c\n")
+        val project = Project.jvm(root)
+
+        ProjectMigration.changePackageName(from = "a.b", to = "a.b.v2").applyTo(project)
+
+        assertThat(root.resolve("src/main/kotlin/a/b/v2/Foo.kt").readText()).isEqualTo("package a.b.v2\nimport a.b.v2.c.Qux\n")
+        assertThat(root.resolve("src/main/kotlin/a/b/v2/c/Qux.kt").readText()).isEqualTo("package a.b.v2.c\n")
+        assertThat(root.resolve("src/main/kotlin/a/b").listDirectoryEntries().map { it.name }).containsExactly("v2")
+        assertThat(root.resolve("src/main/kotlin").listDirectoryEntries().map { it.name }).containsExactly("a")
     }
 
     @Test

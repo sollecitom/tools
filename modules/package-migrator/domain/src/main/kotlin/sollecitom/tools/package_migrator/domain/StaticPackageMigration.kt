@@ -1,8 +1,8 @@
 package sollecitom.tools.package_migrator.domain
 
 import sollecitom.libs.swissknife.logger.core.loggable.Loggable
-import java.io.File
 import java.nio.file.Path
+import java.util.UUID
 import kotlin.io.path.createDirectories
 import kotlin.io.path.moveTo
 import kotlin.io.path.pathString
@@ -11,26 +11,39 @@ import kotlin.io.path.writeText
 
 internal data class StaticPackageMigration(private val fromPackage: Package, private val toPackage: Package) : ProjectMigration {
 
-    override fun applyTo(project: Project) = with(project) {
+    override fun applyTo(project: Project) {
 
-        notExcludedFiles.forEach { projectFile ->
-            with(projectFile) {
-                replaceTextIfPresent(
-                    fromPackage.name.asWholeSegmentsRegex() to toPackage.name,
-                    fromPackage.asPath.pathString.asWholeSegmentsRegex() to toPackage.asPath.pathString
-                )
+        val temporaryPackage = newTemporaryPackage()
+        project.rewriteReferences(fromPackage, toPackage)
+        project.movePackage(fromPackage, temporaryPackage)
+        project.movePackage(temporaryPackage, toPackage)
+    }
 
-                takeIf { it.isWithinPackage(fromPackage, rootDirectory.path) }?.movePackage(fromPackage, toPackage, rootDirectory.path)
-            }
+    private fun Project.rewriteReferences(originalPackage: Package, targetPackage: Package) {
+
+        notExcludedFiles.forEach { file ->
+            file.replaceTextIfPresent(
+                originalPackage.name.asWholeSegmentsRegex() to targetPackage.name,
+                originalPackage.asPath.pathString.asWholeSegmentsRegex() to targetPackage.asPath.pathString
+            )
         }
-        directoriesWithinPackage(fromPackage).forEach {
-            if (it.isEmpty) {
-                it.delete()
+    }
+
+    private fun Project.movePackage(originalPackage: Package, targetPackage: Package) {
+
+        notExcludedFiles.filter { it.isWithinPackage(originalPackage, root) }.forEach { file ->
+            file.movePackage(originalPackage, targetPackage, root)
+        }
+        directoriesWithinPackage(originalPackage).forEach { directory ->
+            if (directory.isEmpty) {
+                directory.delete()
             } else {
-                it.path.movePackage(fromPackage, toPackage, rootDirectory.path)
+                directory.path.movePackage(originalPackage, targetPackage, root)
             }
         }
     }
+
+    private fun newTemporaryPackage() = "package_migration_${UUID.randomUUID().toString().replace("-", "")}".let(::Package)
 
     private fun Directory.delete() {
 
@@ -38,16 +51,21 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         logger.info { "Deleted directory $this" }
     }
 
-    private val Project.notExcludedFiles get() = rootDirectory.files.filterNot { it.isWithinFolder(excludedFolderNames, rootDirectory.path) }
+    private val Project.root: Path get() = rootDirectory.path
 
-    private fun Project.directoriesWithinPackage(containingPackage: Package): Sequence<Directory> = rootDirectory.directories.filterNot { it.isWithinFolder(excludedFolderNames, rootDirectory.path) }.filter { it.isWithinPackage(containingPackage, rootDirectory.path) }.sortedByDescending { it.pathString.length }.map(::Directory)
+    private val Project.notExcludedFiles get() = rootDirectory.files.filterNot { it.isWithinFolder(excludedFolderNames, root) }
+
+    private fun Project.directoriesWithinPackage(containingPackage: Package): Sequence<Directory> = rootDirectory.directories
+        .filterNot { it.isWithinFolder(excludedFolderNames, root) }
+        .filter { it.isWithinPackage(containingPackage, root) }
+        .sortedByDescending { it.pathString.length }
+        .map(::Directory)
 
     private fun Path.movePackage(originalPackage: Package, targetPackage: Package, root: Path) {
 
-        val segments = root.relativize(this).segments
-        val packageSegments = originalPackage.asPath.segments
-        val start = segments.indexOfSegments(packageSegments)
-        val newSegments = segments.take(start) + targetPackage.asPath.segments + segments.drop(start + packageSegments.size)
+        val segments = segmentsWithin(root)
+        val start = segments.indexOfSegments(originalPackage.segments)
+        val newSegments = segments.take(start) + targetPackage.segments + segments.drop(start + originalPackage.segments.size)
         val newPath = newSegments.fold(root, Path::resolve)
         newPath.parent.createDirectories()
         moveTo(newPath)
@@ -64,15 +82,11 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         }
     }
 
-    private fun Path.isWithinFolder(folderNames: Set<String>, root: Path): Boolean {
+    private fun Path.isWithinFolder(folderNames: Set<String>, root: Path) = segmentsWithin(root).any { it in folderNames }
 
-        val segments = root.relativize(this).pathString.split(File.separator)
-        return segments.any { it in folderNames }
-    }
+    private fun Path.isWithinPackage(prospectiveContainingPackage: Package, root: Path) = segmentsWithin(root).indexOfSegments(prospectiveContainingPackage.segments) >= 0
 
-    private fun Path.isWithinPackage(prospectiveContainingPackage: Package, root: Path) = root.relativize(this).segments.indexOfSegments(prospectiveContainingPackage.asPath.segments) >= 0
-
-    private val Path.segments: List<String> get() = map(Path::pathString)
+    private fun Path.segmentsWithin(root: Path): List<String> = root.relativize(this).map(Path::pathString)
 
     private fun List<String>.indexOfSegments(target: List<String>): Int = windowed(target.size).indexOf(target)
 

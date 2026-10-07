@@ -14,6 +14,8 @@ value class Package(val name: String) {
 
     val asPath: Path get() = Paths.get(name.replace(SEPARATOR, File.separator))
 
+    val segments: List<String> get() = name.split(SEPARATOR)
+
     private companion object {
 
         private const val SEPARATOR = "."
