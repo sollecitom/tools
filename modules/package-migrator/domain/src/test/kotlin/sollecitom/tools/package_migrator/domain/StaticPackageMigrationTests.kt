@@ -53,6 +53,31 @@ class StaticPackageMigrationTests {
     }
 
     @Test
+    fun `source directories emptied by the migration are deleted up to the source set root`(@TempDir root: Path) {
+
+        root.file("src/main/kotlin/a/b/Foo.kt", "package a.b\n")
+        val project = Project.jvm(root)
+
+        ProjectMigration.changePackageName(from = "a.b", to = "c.d").applyTo(project)
+
+        assertThat(root.resolve("src/main/kotlin").listDirectoryEntries().map { it.name }).containsExactly("c")
+        assertThat(root.resolve("src/main/kotlin/c/d/Foo.kt").readText()).isEqualTo("package c.d\n")
+    }
+
+    @Test
+    fun `a single segment package is rewritten as a package name or as a path depending on its context`(@TempDir root: Path) {
+
+        root.file("src/main/kotlin/a/Foo.kt", "package a\nimport a.Bar\nval path = \"src/main/kotlin/a/Foo.kt\"\n")
+        root.file("src/main/kotlin/a/Bar.kt", "package a\n")
+        val project = Project.jvm(root)
+
+        ProjectMigration.changePackageName(from = "a", to = "b.c").applyTo(project)
+
+        assertThat(root.resolve("src/main/kotlin/b/c/Foo.kt").readText()).isEqualTo("package b.c\nimport b.c.Bar\nval path = \"src/main/kotlin/b/c/Foo.kt\"\n")
+        assertThat(root.resolve("src/main/kotlin/b/c/Bar.kt").readText()).isEqualTo("package b.c\n")
+    }
+
+    @Test
     fun `excluded directories are never moved or rewritten`(@TempDir root: Path) {
 
         root.file("src/main/kotlin/a/b/c/Foo.kt", "package a.b.c\n")

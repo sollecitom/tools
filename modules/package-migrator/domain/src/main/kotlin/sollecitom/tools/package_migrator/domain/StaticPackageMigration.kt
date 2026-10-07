@@ -1,9 +1,13 @@
 package sollecitom.tools.package_migrator.domain
 
 import sollecitom.libs.swissknife.logger.core.loggable.Loggable
+import java.io.File
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.createDirectories
+import kotlin.io.path.deleteExisting
+import kotlin.io.path.isDirectory
+import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.moveTo
 import kotlin.io.path.pathString
 import kotlin.io.path.readText
@@ -21,11 +25,9 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
 
     private fun Project.rewriteReferences(originalPackage: Package, targetPackage: Package) {
 
+        val references = originalPackage.referencesRegex()
         notExcludedFiles.forEach { file ->
-            file.replaceTextIfPresent(
-                originalPackage.name.asWholeSegmentsRegex() to targetPackage.name,
-                originalPackage.asPath.pathString.asWholeSegmentsRegex() to targetPackage.asPath.pathString
-            )
+            file.replaceTextIfPresent(references) { reference -> if (reference.groups[PATH_REFERENCE] != null) targetPackage.asPath.pathString else targetPackage.name }
         }
     }
 
@@ -36,7 +38,7 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         }
         directoriesWithinPackage(originalPackage).forEach { directory ->
             if (directory.isEmpty) {
-                directory.delete()
+                directory.path.deleteWithEmptyParents(originalPackage, root)
             } else {
                 directory.path.movePackage(originalPackage, targetPackage, root)
             }
@@ -44,12 +46,6 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
     }
 
     private fun newTemporaryPackage() = "package_migration_${UUID.randomUUID().toString().replace("-", "")}".let(::Package)
-
-    private fun Directory.delete() {
-
-        deleteIfExists()
-        logger.info { "Deleted directory $this" }
-    }
 
     private val Project.root: Path get() = rootDirectory.path
 
@@ -59,6 +55,7 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         .filterNot { it.isWithinFolder(excludedFolderNames, root) }
         .filter { it.isWithinPackage(containingPackage, root) }
         .sortedByDescending { it.pathString.length }
+        .filter { it.isDirectory() }
         .map(::Directory)
 
     private fun Path.movePackage(originalPackage: Package, targetPackage: Package, root: Path) {
@@ -70,12 +67,32 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         newPath.parent.createDirectories()
         moveTo(newPath)
         logger.info { "Moved $this to $newPath" }
+        deleteEmptyParents(upTo = sourceSetRoot(originalPackage, root))
     }
 
-    private fun Path.replaceTextIfPresent(vararg replacements: Pair<Regex, String>) {
+    private fun Path.deleteWithEmptyParents(containingPackage: Package, root: Path) {
+
+        deleteExisting()
+        logger.info { "Deleted directory $this" }
+        deleteEmptyParents(upTo = sourceSetRoot(containingPackage, root))
+    }
+
+    private fun Path.deleteEmptyParents(upTo: Path) = generateSequence(parent, Path::getParent)
+        .takeWhile { it != upTo && it.startsWith(upTo) }
+        .takeWhile { it.listDirectoryEntries().isEmpty() }
+        .forEach {
+            it.deleteExisting()
+            logger.info { "Deleted directory $it" }
+        }
+
+    private fun Path.sourceSetRoot(containingPackage: Package, root: Path): Path = segmentsWithin(root)
+        .let { segments -> segments.take(segments.indexOfSegments(containingPackage.segments)) }
+        .fold(root, Path::resolve)
+
+    private fun Path.replaceTextIfPresent(target: Regex, replacement: (MatchResult) -> CharSequence) {
 
         val originalContent = readText()
-        val newContent = replacements.fold(originalContent) { content, (target, replacement) -> content.replace(target, Regex.escapeReplacement(replacement)) }
+        val newContent = originalContent.replace(target, replacement)
         newContent.takeUnless { it == originalContent }?.let {
             writeText(it)
             logger.info { "Modified file $this" }
@@ -90,9 +107,21 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
 
     private fun List<String>.indexOfSegments(target: List<String>): Int = windowed(target.size).indexOf(target)
 
-    private fun String.asWholeSegmentsRegex() = Regex("""(?<![\w$])${Regex.escape(this)}(?![\w$])""")
+    private fun Package.referencesRegex() = Regex("(?<$PATH_REFERENCE>${pathReferencePattern()})|${name.asWholeSegmentsPattern()}")
 
-    companion object : Loggable()
+    private fun Package.pathReferencePattern(): String {
+
+        val separator = Regex.escape(File.separator)
+        val pattern = asPath.pathString.asWholeSegmentsPattern()
+        return if (segments.size > 1) pattern else "$pattern(?=$separator)|(?<=$separator)$pattern"
+    }
+
+    private fun String.asWholeSegmentsPattern() = """(?<![\w$])${Regex.escape(this)}(?![\w$])"""
+
+    companion object : Loggable() {
+
+        private const val PATH_REFERENCE = "path"
+    }
 }
 
 fun ProjectMigration.Companion.changePackageName(from: String, to: String): ProjectMigration = StaticPackageMigration(fromPackage = from.let(::Package), toPackage = to.let(::Package))
