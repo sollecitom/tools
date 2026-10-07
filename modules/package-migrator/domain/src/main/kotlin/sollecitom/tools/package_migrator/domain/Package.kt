@@ -12,7 +12,7 @@ value class Package(val name: String) {
         require(name.isValidPackageName()) { "Invalid package name '$name'" }
     }
 
-    val asPath: Path get() = Paths.get(name.replace(SEPARATOR, File.separator))
+    val asPath: Path get() = name.replace(SEPARATOR, File.separator).let(Paths::get)
 
     val segments: List<String> get() = name.split(SEPARATOR)
 

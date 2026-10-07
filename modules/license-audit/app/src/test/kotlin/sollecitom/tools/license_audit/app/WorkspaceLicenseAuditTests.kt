@@ -101,7 +101,7 @@ class WorkspaceLicenseAuditTests {
 
         fun markCachedComponentAsMissing() {
             val statePath = repoReports.resolve("state.json")
-            val state = JSONObject(statePath.readText())
+            val state = statePath.readText().let(::JSONObject)
             state.getJSONArray("components").getJSONObject(0).put("resolutionSource", "missing").put("rawLicenses", JSONArray())
             state.put("findings", JSONArray(listOf(JSONObject(mapOf("status" to "UNKNOWN", "repo" to REPO, "component" to COORDINATE, "license" to "(missing)")))))
             statePath.writeText(state.toString())

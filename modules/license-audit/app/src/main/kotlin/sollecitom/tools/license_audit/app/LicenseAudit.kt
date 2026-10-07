@@ -84,7 +84,7 @@ internal class WorkspaceLicenseAudit(
 ) {
 
     private val yaml = Yaml()
-    private val policy = LicensePolicy.from(loadMap(workspaceRoot.resolve("policy/license-policy.yml")))
+    private val policy = workspaceRoot.resolve("policy/license-policy.yml").let(::loadMap).let(LicensePolicy::from)
     private val classifier = LicenseClassifier(policy)
     private val licenseResolver = MavenLicenseResolver(workspaceRoot = workspaceRoot)
     private val dependencyFingerprintInputs = listOf(
@@ -187,7 +187,7 @@ internal class WorkspaceLicenseAudit(
         val files = linkedSetOf<java.nio.file.Path>()
         files += policyFingerprintInputs.filter { path -> path.exists() }
         files += repoPolicyInputFiles(repoPath)
-        return sha256(sha256OfFiles(basePath = workspaceRoot, files = files) + activeWaivers.joinToString())
+        return (sha256OfFiles(basePath = workspaceRoot, files = files) + activeWaivers.joinToString()).let(::sha256)
     }
 
     private fun repoDependencyInputFiles(repoPath: java.nio.file.Path): List<java.nio.file.Path> {
@@ -224,7 +224,7 @@ internal class WorkspaceLicenseAudit(
     private fun loadDependencySnapshot(repoPath: java.nio.file.Path): DependencySnapshot {
         val path = repoPath.resolve("build/reports/license-audit/dependency-snapshot.json")
         require(path.exists()) { "Expected dependency snapshot at $path" }
-        val json = JSONObject(path.readText())
+        val json = path.readText().let(::JSONObject)
         val components = json.optJSONArray("components") ?: JSONArray()
         return DependencySnapshot(
             repo = json.optString("repo").ifBlank { repoPath.name },
@@ -434,7 +434,7 @@ internal class WorkspaceLicenseAudit(
                 reason = waiverMap["reason"]?.toString() ?: error("Waiver in $waiverPath is missing reason"),
                 expires = when (val expires = waiverMap["expires"] ?: error("Waiver in $waiverPath is missing expires")) {
                     is Date -> expires.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
-                    else -> LocalDate.parse(expires.toString())
+                    else -> expires.toString().let(LocalDate::parse)
                 },
             )
             if (waiver.expires.isBefore(today)) {
@@ -462,7 +462,7 @@ internal class WorkspaceLicenseAudit(
     private fun loadCacheState(cachePath: java.nio.file.Path): CachedRepoState? {
         if (!cachePath.exists()) return null
         return runCatching {
-            val json = JSONObject(cachePath.readText())
+            val json = cachePath.readText().let(::JSONObject)
             CachedRepoState(
                 schemaVersion = json.optInt("schemaVersion"),
                 dependencyFingerprint = json.optString("dependencyFingerprint"),
@@ -745,7 +745,7 @@ internal class WorkspaceLicenseAudit(
     private fun sha256OfFiles(basePath: java.nio.file.Path, files: Collection<java.nio.file.Path>): String {
         val digest = MessageDigest.getInstance("SHA-256")
         files.sortedBy { path -> path.toString() }.forEach { path ->
-            digest.update(path.relativeTo(basePath).toString().toByteArray())
+            path.relativeTo(basePath).toString().toByteArray().let(digest::update)
             digest.update(0)
             digest.update(path.readBytes())
             digest.update(0)
@@ -1038,7 +1038,7 @@ internal class MavenLicenseResolver(
     private fun loadCache() {
         if (!cachePath.exists()) return
         runCatching {
-            val json = JSONObject(cachePath.readText())
+            val json = cachePath.readText().let(::JSONObject)
             if (json.optInt("schemaVersion") != MAVEN_LICENSE_CACHE_SCHEMA_VERSION) {
                 cache.clear()
                 dirty = true
@@ -1139,9 +1139,10 @@ internal data class LicensePolicy(
         val candidate = rawValue.trim()
         if (candidate.isEmpty()) return NormalizedLicense(display = "(missing)", canonical = null)
 
+        val normalizedKey = normalizeAliasKey(candidate)
         val canonical = when {
             aliases.containsKey(candidate) -> aliases.getValue(candidate)
-            normalizedAliases.containsKey(normalizeAliasKey(candidate)) -> normalizedAliases.getValue(normalizeAliasKey(candidate))
+            normalizedAliases.containsKey(normalizedKey) -> normalizedAliases.getValue(normalizedKey)
             candidate in allowed || candidate in review || candidate in denied -> candidate
             candidate.startsWith("LicenseRef-") -> candidate
             looksLikeLicenseIdentifier(candidate) -> candidate
