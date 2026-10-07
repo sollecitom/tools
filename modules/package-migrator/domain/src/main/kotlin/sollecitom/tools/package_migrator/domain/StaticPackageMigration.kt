@@ -61,7 +61,7 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
     private fun Path.movePackage(originalPackage: Package, targetPackage: Package, root: Path) {
 
         val segments = segmentsWithin(root)
-        val start = segments.indexOfSegments(originalPackage.segments)
+        val start = checkNotNull(segments.indexOfPackage(originalPackage)) { "$this is not within package ${originalPackage.name}" }
         val newSegments = segments.take(start) + targetPackage.segments + segments.drop(start + originalPackage.segments.size)
         val newPath = newSegments.fold(root, Path::resolve)
         newPath.parent.createDirectories()
@@ -86,7 +86,7 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         }
 
     private fun Path.sourceSetRoot(containingPackage: Package, root: Path): Path = segmentsWithin(root)
-        .let { segments -> segments.take(segments.indexOfSegments(containingPackage.segments)) }
+        .let { segments -> segments.take(checkNotNull(segments.indexOfPackage(containingPackage))) }
         .fold(root, Path::resolve)
 
     private fun Path.replaceTextIfPresent(target: Regex, replacement: (MatchResult) -> CharSequence) {
@@ -99,28 +99,42 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         }
     }
 
-    private fun Path.isWithinFolder(folderNames: Set<String>, root: Path) = segmentsWithin(root).any { it in folderNames }
+    private fun Path.isWithinFolder(folderNames: Set<String>, root: Path) = segmentsWithin(root).takeWhile { it != SOURCE_DIRECTORY_NAME }.any { it in folderNames }
 
-    private fun Path.isWithinPackage(prospectiveContainingPackage: Package, root: Path) = segmentsWithin(root).indexOfSegments(prospectiveContainingPackage.segments) >= 0
+    private fun Path.isWithinPackage(prospectiveContainingPackage: Package, root: Path) = segmentsWithin(root).indexOfPackage(prospectiveContainingPackage) != null
 
     private fun Path.segmentsWithin(root: Path): List<String> = root.relativize(this).map(Path::pathString)
 
-    private fun List<String>.indexOfSegments(target: List<String>): Int = windowed(target.size).indexOf(target)
+    private fun List<String>.indexOfPackage(containingPackage: Package): Int? = indexOf(SOURCE_DIRECTORY_NAME)
+        .takeIf { it >= 0 }
+        ?.let { it + SOURCE_SET_ROOT_DEPTH }
+        ?.takeIf { packageStart -> drop(packageStart).take(containingPackage.segments.size) == containingPackage.segments }
 
-    private fun Package.referencesRegex() = Regex("(?<$PATH_REFERENCE>${pathReferencePattern()})|${name.asWholeSegmentsPattern()}")
+    private fun Package.referencesRegex() = Regex("(?<$PATH_REFERENCE>${pathReferencePattern()})|${nameReferencePattern()}")
 
     private fun Package.pathReferencePattern(): String {
 
-        val separator = Regex.escape(File.separator)
-        val pattern = asPath.pathString.asWholeSegmentsPattern()
-        return if (segments.size > 1) pattern else "$pattern(?=$separator)|(?<=$separator)$pattern"
+        val path = Regex.escape(asPath.pathString)
+        return if (segments.size > 1) "$PATH_START$path$IDENTIFIER_END" else "$PATH_START$path(?=$SEPARATOR)"
     }
 
-    private fun String.asWholeSegmentsPattern() = """(?<![\w$])${Regex.escape(this)}(?![\w$])"""
+    private fun Package.nameReferencePattern(): String {
+
+        val name = Regex.escape(name)
+        return if (segments.size > 1) "$NAME_START$name$IDENTIFIER_END" else "$DECLARATION_START$name$IDENTIFIER_END|$NAME_START$name(?=\\.[A-Za-z_$])"
+    }
 
     companion object : Loggable() {
 
         private const val PATH_REFERENCE = "path"
+        private const val SOURCE_DIRECTORY_NAME = "src"
+        private const val SOURCE_SET_ROOT_DEPTH = 3
+        private val SEPARATOR = "\\${File.separatorChar}"
+        private val SOURCE_SET_ROOT = "$SOURCE_DIRECTORY_NAME$SEPARATOR[^$SEPARATOR]{1,64}$SEPARATOR[^$SEPARATOR]{1,64}$SEPARATOR"
+        private val PATH_START = "(?:(?<![\\w$.$SEPARATOR])|(?<=$SOURCE_SET_ROOT))"
+        private const val NAME_START = "(?<![\\w$.])"
+        private const val DECLARATION_START = "(?<=\\b(?:package|import)\\s{1,16})"
+        private const val IDENTIFIER_END = "(?![\\w$])"
     }
 }
 

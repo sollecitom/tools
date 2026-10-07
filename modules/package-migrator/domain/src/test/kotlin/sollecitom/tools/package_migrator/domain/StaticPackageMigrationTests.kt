@@ -92,5 +92,40 @@ class StaticPackageMigrationTests {
         assertThat(root.resolve(".idea/a/b/c/Workspace.kt").readText()).isEqualTo("package a.b.c\n")
     }
 
+    @Test
+    fun `packages that merely end with the migrated package's segments are left alone`(@TempDir root: Path) {
+
+        root.file("src/main/kotlin/a/b/c/Foo.kt", "package a.b.c\nimport x.a.b.c.Other\n")
+        root.file("src/main/kotlin/x/a/b/c/Other.kt", "package x.a.b.c\nval path = \"src/main/kotlin/x/a/b/c\"\n")
+        val project = Project.jvm(root)
+
+        ProjectMigration.changePackageName(from = "a.b.c", to = "b.d").applyTo(project)
+
+        assertThat(root.resolve("src/main/kotlin/b/d/Foo.kt").readText()).isEqualTo("package b.d\nimport x.a.b.c.Other\n")
+        assertThat(root.resolve("src/main/kotlin/x/a/b/c/Other.kt").readText()).isEqualTo("package x.a.b.c\nval path = \"src/main/kotlin/x/a/b/c\"\n")
+    }
+
+    @Test
+    fun `a single segment package leaves unrelated words alone`(@TempDir root: Path) {
+
+        root.file("src/main/kotlin/a/Foo.kt", "package a\n// this is a test\nval a = 1\n")
+        val project = Project.jvm(root)
+
+        ProjectMigration.changePackageName(from = "a", to = "b.c").applyTo(project)
+
+        assertThat(root.resolve("src/main/kotlin/b/c/Foo.kt").readText()).isEqualTo("package b.c\n// this is a test\nval a = 1\n")
+    }
+
+    @Test
+    fun `a package with an excluded directory name as a segment is migrated`(@TempDir root: Path) {
+
+        root.file("src/main/kotlin/x/gradle/y/Foo.kt", "package x.gradle.y\n")
+        val project = Project.jvm(root)
+
+        ProjectMigration.changePackageName(from = "x.gradle.y", to = "z").applyTo(project)
+
+        assertThat(root.resolve("src/main/kotlin/z/Foo.kt").readText()).isEqualTo("package z\n")
+    }
+
     private fun Path.file(relativePath: String, content: String) = resolve(relativePath).also { it.parent.createDirectories() }.writeText(content)
 }

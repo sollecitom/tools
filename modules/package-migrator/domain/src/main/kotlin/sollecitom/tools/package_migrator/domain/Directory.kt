@@ -2,7 +2,6 @@ package sollecitom.tools.package_migrator.domain
 
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.io.path.deleteIfExists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 
@@ -22,6 +21,4 @@ value class Directory(val path: Path) {
     val directories: Sequence<Path> get() = content.filter { it.isDirectory() }
 
     val isEmpty: Boolean get() = Files.list(path).use { it.findAny().isEmpty }
-
-    fun deleteIfExists(): Boolean = path.deleteIfExists()
 }
