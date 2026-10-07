@@ -121,7 +121,7 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
     private fun Package.nameReferencePattern(): String {
 
         val name = Regex.escape(name)
-        return if (segments.size > 1) "$NAME_START$name$IDENTIFIER_END" else "$DECLARATION_START$name$IDENTIFIER_END|$NAME_START$name(?=\\.[A-Za-z_$])"
+        return if (segments.size > 1) "$NAME_START$name$IDENTIFIER_END" else "$DECLARATION_START$name$IDENTIFIER_END|$NAME_START$name$QUALIFIED_TYPE_FOLLOWS"
     }
 
     companion object : Loggable() {
@@ -135,6 +135,7 @@ internal data class StaticPackageMigration(private val fromPackage: Package, pri
         private const val NAME_START = "(?<![\\w$.])"
         private const val DECLARATION_START = "(?<=\\b(?:package|import)\\s{1,16})"
         private const val IDENTIFIER_END = "(?![\\w$])"
+        private const val QUALIFIED_TYPE_FOLLOWS = "(?=(?:\\.[a-z_$][\\w$]*)*\\.[A-Z])"
     }
 }
 

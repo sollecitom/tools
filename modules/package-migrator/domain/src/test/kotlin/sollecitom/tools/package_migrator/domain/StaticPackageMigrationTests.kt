@@ -67,13 +67,13 @@ class StaticPackageMigrationTests {
     @Test
     fun `a single segment package is rewritten as a package name or as a path depending on its context`(@TempDir root: Path) {
 
-        root.file("src/main/kotlin/a/Foo.kt", "package a\nimport a.Bar\nval path = \"src/main/kotlin/a/Foo.kt\"\n")
+        root.file("src/main/kotlin/a/Foo.kt", "package a\nimport a.Bar\nval bar = a.Bar()\nval path = \"src/main/kotlin/a/Foo.kt\"\n")
         root.file("src/main/kotlin/a/Bar.kt", "package a\n")
         val project = Project.jvm(root)
 
         ProjectMigration.changePackageName(from = "a", to = "b.c").applyTo(project)
 
-        assertThat(root.resolve("src/main/kotlin/b/c/Foo.kt").readText()).isEqualTo("package b.c\nimport b.c.Bar\nval path = \"src/main/kotlin/b/c/Foo.kt\"\n")
+        assertThat(root.resolve("src/main/kotlin/b/c/Foo.kt").readText()).isEqualTo("package b.c\nimport b.c.Bar\nval bar = b.c.Bar()\nval path = \"src/main/kotlin/b/c/Foo.kt\"\n")
         assertThat(root.resolve("src/main/kotlin/b/c/Bar.kt").readText()).isEqualTo("package b.c\n")
     }
 
@@ -108,12 +108,12 @@ class StaticPackageMigrationTests {
     @Test
     fun `a single segment package leaves unrelated words alone`(@TempDir root: Path) {
 
-        root.file("src/main/kotlin/a/Foo.kt", "package a\n// this is a test\nval a = 1\n")
+        root.file("src/main/kotlin/a/Foo.kt", "package a\n// this is a test\nval a = \"text\"\nval length = a.length\n")
         val project = Project.jvm(root)
 
         ProjectMigration.changePackageName(from = "a", to = "b.c").applyTo(project)
 
-        assertThat(root.resolve("src/main/kotlin/b/c/Foo.kt").readText()).isEqualTo("package b.c\n// this is a test\nval a = 1\n")
+        assertThat(root.resolve("src/main/kotlin/b/c/Foo.kt").readText()).isEqualTo("package b.c\n// this is a test\nval a = \"text\"\nval length = a.length\n")
     }
 
     @Test
