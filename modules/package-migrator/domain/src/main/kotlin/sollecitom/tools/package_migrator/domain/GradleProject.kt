@@ -13,7 +13,7 @@ internal class GradleProject(override val rootDirectory: Directory) : Project {
 
     companion object {
 
-        val excludedFolderNames = setOf("build", ".git", ".kotlin", "gradle")
+        val excludedFolderNames = setOf("build", ".git", ".kotlin", "gradle", ".gradle", ".idea")
     }
 }
 

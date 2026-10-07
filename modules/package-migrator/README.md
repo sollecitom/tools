@@ -13,11 +13,11 @@ IntelliJ IDEA is shockingly poor at migrating packages in JVM projects. Until th
 ## Usage
 
 1. Ensure the project you want to migrate is up-to-date with your remote branch e.g. "main", without any local changes.
-2. Modify your local `./app/src/main/kotlin/sollecitom/tools/project_package_migrator/app/ProjectPackageMigrator.kt`, changing the following:
-    1. `targetProjectRootDirectory`: the absolute path for the root folder of the project you want to migrate e.g. `"/Users/michele/workspace/kotlin-monorepo-monolith-example/example/command-endpoint"`.
-    2. `migrations`: the specific package mappings you want to migrate e.g. `packageMigrations("sollecitom.example.command_endpoint" to "sollecitom.example.another_endpoint")`. You can batch multiple package migrations in the same invocation, with the note that having the most specific migrations run first is a good idea in this case.
+2. Edit `migrations` in `./app/src/main/kotlin/sollecitom/tools/package_migrator/app/PackageMigrator.kt` with the package mappings you want e.g. `packageMigrations("sollecitom.example.command_endpoint" to "sollecitom.example.another_endpoint")`. You can batch multiple package migrations in the same invocation; run the most specific ones first.
 3. Commit locally, without pushing upstream.
-4. Run/Debug `./app/src/main/kotlin/sollecitom/tools/project_package_migrator/app/ProjectPackageMigrator.kt`.
+4. Run `PackageMigrator.kt` with `--project <dir>`, the root folder of the project you want to migrate (without it, the working directory is migrated).
 5. Check the state of the project to ensure it's now what you intended it to be.
 6. If it's all good, commit and push.
-7. If anything is wrong, restore your workspace to the original upstream branch e.g., by running `git fetch origin && git reset --hard origin/main && git clean -f -d` if you were on the main branch. 
+7. If anything is wrong, restore your workspace to the original upstream branch e.g., by running `git fetch origin && git reset --hard origin/main && git clean -f -d` if you were on the main branch.
+
+Packages are matched on whole segments only, both in file contents and in paths: migrating `a.b.c` leaves `a.b.common` and `xa.b.c` alone, while `a.b.c.d` (a subpackage) is migrated. Directories named `build`, `gradle`, `.git`, `.gradle`, `.kotlin` and `.idea` are never rewritten or moved.
