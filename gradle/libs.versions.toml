@@ -1,7 +1,7 @@
 [versions]
 # libraries
 kotlin = "2.4.21"
-sollecitom-swissknife = "1.0.64"
+sollecitom-swissknife = "1.0.65"
 org-json = "20260814"
 snakeyaml = "2.7"
 junit-jupiter = "6.1.3"
